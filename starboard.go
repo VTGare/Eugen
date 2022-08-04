@@ -136,7 +136,7 @@ func (se *StarboardEvent) createStarboard() error {
 			}
 
 			if embed != nil {
-				logrus.Infof("Creating a new starboard. Guild: %v, channel: %v, message: %v", se.guild.Name, se.addEvent.ChannelID, se.addEvent.MessageID)
+				logrus.Infof("Creating a new starboard. Guild: %v, channel: %v, message: %v", se.guild.ID, se.addEvent.ChannelID, se.addEvent.MessageID)
 
 				starboardChannel := ""
 				if ch.NSFW && se.guild.NSFWStarboardChannel != "" {
@@ -287,7 +287,7 @@ func (se *StarboardEvent) createEmbed(react *discordgo.MessageReactions, ch *dis
 	var (
 		eb         = embeds.NewBuilder()
 		resp       *http.Response
-		t, _       = se.message.Timestamp.Parse()
+		t          = se.message.Timestamp
 		messageURL = fmt.Sprintf("https://discord.com/channels/%v/%v/%v", se.addEvent.GuildID, se.addEvent.ChannelID, se.message.ID)
 		msg        = &discordgo.MessageSend{}
 		content    = se.message.Content
@@ -344,6 +344,12 @@ func (se *StarboardEvent) createEmbed(react *discordgo.MessageReactions, ch *dis
 	if ref := se.message.MessageReference; ref != nil {
 		uri := fmt.Sprintf("https://discord.com/channels/%v/%v/%v", ref.GuildID, ref.ChannelID, ref.MessageID)
 		eb.AddField("Reply to", fmt.Sprintf("[Click here desu~](%v)", uri), true)
+	}
+
+	if len(se.message.StickerItems) != 0 {
+		sticker := se.message.StickerItems[0]
+		url := fmt.Sprintf("https://media.discordapp.net/stickers/%v.webp", sticker.ID)
+		eb.Image(url)
 	}
 
 	switch {

@@ -31,6 +31,12 @@ func main() {
 		log.Fatalln("Error creating a session: ", err)
 	}
 
+	dg.Identify.Intents = discordgo.IntentsGuildEmojis |
+		discordgo.IntentGuildMessageReactions |
+		discordgo.IntentGuildMessages |
+		discordgo.IntentMessageContent |
+		discordgo.IntentsDirectMessages
+
 	dg.AddHandler(onReady)
 	dg.AddHandler(messageCreated)
 	dg.AddHandler(guildCreated)

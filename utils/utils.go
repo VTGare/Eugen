@@ -70,7 +70,7 @@ func CreateDB(eventGuilds []*discordgo.Guild) error {
 }
 
 //MemberHasPermission checks if guild member has a permission to do something on a server.
-func MemberHasPermission(s *discordgo.Session, guildID string, userID string, permission int) (bool, error) {
+func MemberHasPermission(s *discordgo.Session, guildID string, userID string, permission int64) (bool, error) {
 	member, err := s.State.Member(guildID, userID)
 	if err != nil {
 		if member, err = s.GuildMember(guildID, userID); err != nil {
