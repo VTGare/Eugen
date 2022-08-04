@@ -323,7 +323,7 @@ func (se *StarboardEvent) createEmbed(react *discordgo.MessageReactions, ch *dis
 
 	if len(se.message.StickerItems) != 0 {
 		sticker := se.message.StickerItems[0]
-		url := fmt.Sprintf("https://media.discordapp.net/stickers/%v.webp", sticker.ID)
+		url := fmt.Sprintf("https://cdn.discordapp.com/stickers/%v.png", sticker.ID)
 		eb.Image(url)
 	}
 
