@@ -324,7 +324,7 @@ func (se *StarboardEvent) createEmbed(react *discordgo.MessageReactions, ch *dis
 	eb.Author(fmt.Sprintf("%v in #%v", se.message.Author.String(), ch.Name), messageURL, se.message.Author.AvatarURL(""))
 	eb.Color(int(se.guild.EmbedColour))
 	eb.Timestamp(t)
-	eb.AddField("Original message", fmt.Sprintf("[Click here desu~](%v)", messageURL), true)
+	eb.AddField("Original message", fmt.Sprintf("[Click here](%v)", messageURL), true)
 	if se.guild.IsGuildEmoji() {
 		text := fmt.Sprintf("%v", react.Count)
 		if se.selfstar && se.guild.Selfstar {
@@ -343,7 +343,7 @@ func (se *StarboardEvent) createEmbed(react *discordgo.MessageReactions, ch *dis
 
 	if ref := se.message.MessageReference; ref != nil {
 		uri := fmt.Sprintf("https://discord.com/channels/%v/%v/%v", ref.GuildID, ref.ChannelID, ref.MessageID)
-		eb.AddField("Reply to", fmt.Sprintf("[Click here desu~](%v)", uri), true)
+		eb.AddField("Reply to", fmt.Sprintf("[Click here](%v)", uri), true)
 	}
 
 	if len(se.message.StickerItems) != 0 {
@@ -376,12 +376,12 @@ func (se *StarboardEvent) createEmbed(react *discordgo.MessageReactions, ch *dis
 					},
 				}
 			} else {
-				eb.AddField("Attachment", fmt.Sprintf("[Click here desu~](%v)", first.URL), true)
+				eb.AddField("Attachment", fmt.Sprintf("[Click here](%v)", first.URL), true)
 			}
 		}
 
 		for ind, a := range rest {
-			eb.AddField(fmt.Sprintf("Attachment %v", ind+2), fmt.Sprintf("[Click here desu~](%v)", a.URL), true)
+			eb.AddField(fmt.Sprintf("Attachment %v", ind+2), fmt.Sprintf("[Click here](%v)", a.URL), true)
 		}
 	case len(URLs) != 0:
 		switch URLs[0].Type {
@@ -409,7 +409,7 @@ func (se *StarboardEvent) createEmbed(react *discordgo.MessageReactions, ch *dis
 					},
 				}
 			} else {
-				eb.AddField("Attachment", fmt.Sprintf("[Click here desu~](%v)", uri), true)
+				eb.AddField("Attachment", fmt.Sprintf("[Click here](%v)", uri), true)
 			}
 			content = strings.Replace(content, uri, "", 1)
 		case TenorURL:
@@ -456,7 +456,7 @@ func (se *StarboardEvent) createEmbed(react *discordgo.MessageReactions, ch *dis
 			if twitter := utils.TwitterRegex.FindString(se.message.Content); twitter != "" {
 				content = strings.Replace(content, twitter, "", 1)
 				content += fmt.Sprintf("\n[%v](%v)\n```\n%v\n```", emb.Author.Name, emb.Author.URL, emb.Description)
-				eb.AddField("Twitter", fmt.Sprintf("[Click here desu~](%v)", twitter), true)
+				eb.AddField("Twitter", fmt.Sprintf("[Click here](%v)", twitter), true)
 			}
 
 			if emb.Image != nil {
@@ -464,7 +464,7 @@ func (se *StarboardEvent) createEmbed(react *discordgo.MessageReactions, ch *dis
 			}
 
 			if emb.Video != nil {
-				eb.AddField("Twitter video", fmt.Sprintf("[Click here desu~](%v)", emb.Video.URL), true)
+				eb.AddField("Twitter video", fmt.Sprintf("[Click here](%v)", emb.Video.URL), true)
 			}
 		} else if emb.Provider != nil && strings.EqualFold(emb.Provider.Name, "youtube") {
 			eb.Image(emb.Thumbnail.URL)
@@ -472,7 +472,7 @@ func (se *StarboardEvent) createEmbed(react *discordgo.MessageReactions, ch *dis
 			content = strings.Replace(content, yt, "", 1)
 
 			content += "\n```" + emb.Title + "```"
-			eb.AddField("YouTube", fmt.Sprintf("[Click here desu~](%v)", emb.URL), true)
+			eb.AddField("YouTube", fmt.Sprintf("[Click here](%v)", emb.URL), true)
 		} else {
 			if emb.Description != "" {
 				content += "\n"
