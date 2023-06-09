@@ -554,7 +554,7 @@ func showGuildSettings(s *discordgo.Session, m *discordgo.MessageCreate) {
 			},
 		},
 		Thumbnail: &discordgo.MessageEmbedThumbnail{
-			URL: guild.IconURL(),
+			URL: guild.IconURL("320"),
 		},
 		Timestamp: utils.EmbedTimestamp(),
 	})

@@ -9,7 +9,6 @@ import (
 
 	"github.com/VTGare/Eugen/database"
 	"github.com/bwmarrin/discordgo"
-	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -36,7 +35,7 @@ var (
 	ErrNoPermission = errors.New("you don't have permissions to execute this command")
 )
 
-//EmbedTimestamp returns currect time formatted to RFC3339 for Discord embeds
+// EmbedTimestamp returns currect time formatted to RFC3339 for Discord embeds
 func EmbedTimestamp() string {
 	return time.Now().Format(time.RFC3339)
 }
@@ -69,7 +68,7 @@ func CreateDB(eventGuilds []*discordgo.Guild) error {
 	return nil
 }
 
-//MemberHasPermission checks if guild member has a permission to do something on a server.
+// MemberHasPermission checks if guild member has a permission to do something on a server.
 func MemberHasPermission(s *discordgo.Session, guildID string, userID string, permission int64) (bool, error) {
 	member, err := s.State.Member(guildID, userID)
 	if err != nil {
@@ -103,7 +102,7 @@ func MemberHasPermission(s *discordgo.Session, guildID string, userID string, pe
 func IsValidChannel(s *discordgo.Session, guildID string, channelID string) bool {
 	ch, err := s.Channel(channelID)
 	if err != nil {
-		logrus.Warnln("IsValidChannel(): ", err)
+		log.Warnln("IsValidChannel(): ", err)
 		return false
 	}
 
@@ -113,7 +112,7 @@ func IsValidChannel(s *discordgo.Session, guildID string, channelID string) bool
 	return false
 }
 
-//FormatBool returns human-readable representation of boolean
+// FormatBool returns human-readable representation of boolean
 func FormatBool(b bool) string {
 	if b {
 		return "enabled"
@@ -131,7 +130,7 @@ func FormatChannel(id string) string {
 	return fmt.Sprintf("<#%v>", id)
 }
 
-//GetEmoji returns a guild emoji API name from Discord state
+// GetEmoji returns a guild emoji API name from Discord state
 func GetEmoji(s *discordgo.Session, guildID, e string) (string, error) {
 	emojis, err := s.GuildEmojis(guildID)
 	if err != nil {

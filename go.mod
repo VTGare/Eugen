@@ -1,14 +1,14 @@
 module github.com/VTGare/Eugen
 
-go 1.18
+go 1.20
 
 require (
 	github.com/VTGare/embeds v0.1.1
-	github.com/bwmarrin/discordgo v0.25.0
+	github.com/bwmarrin/discordgo v0.27.1
 	github.com/jasonlvhit/gocron v0.0.1
-	github.com/sirupsen/logrus v1.9.0
-	go.mongodb.org/mongo-driver v1.10.1
-	mvdan.cc/xurls/v2 v2.4.0
+	github.com/sirupsen/logrus v1.9.3
+	go.mongodb.org/mongo-driver v1.11.7
+	mvdan.cc/xurls/v2 v2.5.0
 )
 
 require (
@@ -22,7 +22,7 @@ require (
 	github.com/xdg-go/stringprep v1.0.3 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20201027041543-1326539a0a0a // indirect
 	golang.org/x/crypto v0.0.0-20220722155217-630584e8d5aa // indirect
-	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4 // indirect
+	golang.org/x/sync v0.1.0 // indirect
 	golang.org/x/sys v0.0.0-20220803195053-6e608f9ce704 // indirect
 	golang.org/x/text v0.3.7 // indirect
 )

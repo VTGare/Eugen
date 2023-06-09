@@ -291,40 +291,15 @@ func (se *StarboardEvent) createEmbed(react *discordgo.MessageReactions, ch *dis
 		messageURL = fmt.Sprintf("https://discord.com/channels/%v/%v/%v", se.addEvent.GuildID, se.addEvent.ChannelID, se.message.ID)
 		msg        = &discordgo.MessageSend{}
 		content    = se.message.Content
-		rx         = xurls.Strict()
-		URLs       = make([]*EugenURL, 0)
 	)
 
-	for _, uri := range rx.FindAllString(content, -1) {
-		parsed, err := url.Parse(uri)
-		if err != nil {
-			continue
-		}
+	urls := se.findURLs(se.message.Content)
 
-		eu := &EugenURL{
-			URL: parsed,
-		}
-
-		switch {
-		case strings.HasSuffix(parsed.Path, "jpg") || strings.HasSuffix(parsed.Path, "png") || strings.HasSuffix(parsed.Path, "jpeg") || strings.HasSuffix(parsed.Path, "webp"):
-			eu.Type = ImageURL
-		case strings.HasSuffix(parsed.Path, "mp4") || strings.HasSuffix(parsed.Path, "webm") || strings.HasSuffix(parsed.Path, "mp4") || strings.HasSuffix(parsed.Path, "mov") || strings.HasSuffix(parsed.Path, "gifv"):
-			eu.Type = VideoURL
-		case strings.Contains(parsed.Host, "imgur"):
-			eu.Type = ImgurURL
-		case strings.Contains(parsed.String(), "tenor.com/view"):
-			eu.Type = TenorURL
-		default:
-			continue
-		}
-
-		URLs = append(URLs, eu)
-	}
-
-	eb.Author(fmt.Sprintf("%v in #%v", se.message.Author.String(), ch.Name), messageURL, se.message.Author.AvatarURL(""))
+	eb.Author(fmt.Sprintf("@%v in #%v", se.message.Author.Username, ch.Name), messageURL, se.message.Author.AvatarURL(""))
 	eb.Color(int(se.guild.EmbedColour))
 	eb.Timestamp(t)
 	eb.AddField("Original message", fmt.Sprintf("[Click here](%v)", messageURL), true)
+
 	if se.guild.IsGuildEmoji() {
 		text := fmt.Sprintf("%v", react.Count)
 		if se.selfstar && se.guild.Selfstar {
@@ -383,14 +358,14 @@ func (se *StarboardEvent) createEmbed(react *discordgo.MessageReactions, ch *dis
 		for ind, a := range rest {
 			eb.AddField(fmt.Sprintf("Attachment %v", ind+2), fmt.Sprintf("[Click here](%v)", a.URL), true)
 		}
-	case len(URLs) != 0:
-		switch URLs[0].Type {
+	case len(urls) != 0:
+		switch urls[0].Type {
 		case ImageURL:
-			str := URLs[0].URL.String()
+			str := urls[0].URL.String()
 			eb.Image(str)
 			content = strings.Replace(content, str, "", 1)
 		case VideoURL:
-			uri := URLs[0].URL.String()
+			uri := urls[0].URL.String()
 			if strings.HasSuffix(uri, "gifv") {
 				uri = strings.Replace(uri, "gifv", "mp4", 1)
 			}
@@ -413,7 +388,7 @@ func (se *StarboardEvent) createEmbed(react *discordgo.MessageReactions, ch *dis
 			}
 			content = strings.Replace(content, uri, "", 1)
 		case TenorURL:
-			tenor := URLs[0].URL.String()
+			tenor := urls[0].URL.String()
 			res, err := services.Tenor(tenor)
 			if err != nil {
 				logrus.Warn(err)
@@ -445,10 +420,10 @@ func (se *StarboardEvent) createEmbed(react *discordgo.MessageReactions, ch *dis
 					eb.Image(emb.Thumbnail.ProxyURL)
 				}
 			} else {
-				eb.Image(fmt.Sprintf("https://i.imgur.com/%v.png", URLs[0].URL.Path))
+				eb.Image(fmt.Sprintf("https://i.imgur.com/%v.png", urls[0].URL.Path))
 			}
 
-			content = strings.Replace(content, URLs[0].URL.String(), "", 1)
+			content = strings.Replace(content, urls[0].URL.String(), "", 1)
 		}
 	case len(se.message.Embeds) != 0:
 		emb := se.message.Embeds[0]
@@ -491,6 +466,41 @@ func (se *StarboardEvent) createEmbed(react *discordgo.MessageReactions, ch *dis
 	eb.Description(content)
 	msg.Embed = eb.Finalize()
 	return msg, resp, nil
+}
+
+func (se *StarboardEvent) findURLs(content string) []*EugenURL {
+	var (
+		rx   = xurls.Strict()
+		urls = make([]*EugenURL, 0)
+	)
+
+	for _, uri := range rx.FindAllString(content, -1) {
+		parsed, err := url.Parse(uri)
+		if err != nil {
+			continue
+		}
+
+		eu := &EugenURL{
+			URL: parsed,
+		}
+
+		switch {
+		case strings.HasSuffix(parsed.Path, "jpg") || strings.HasSuffix(parsed.Path, "png") || strings.HasSuffix(parsed.Path, "jpeg") || strings.HasSuffix(parsed.Path, "webp"):
+			eu.Type = ImageURL
+		case strings.HasSuffix(parsed.Path, "mp4") || strings.HasSuffix(parsed.Path, "webm") || strings.HasSuffix(parsed.Path, "mp4") || strings.HasSuffix(parsed.Path, "mov") || strings.HasSuffix(parsed.Path, "gifv"):
+			eu.Type = VideoURL
+		case strings.Contains(parsed.Host, "imgur"):
+			eu.Type = ImgurURL
+		case strings.Contains(parsed.String(), "tenor.com/view"):
+			eu.Type = TenorURL
+		default:
+			continue
+		}
+
+		urls = append(urls, eu)
+	}
+
+	return urls
 }
 
 func FindReact(message *discordgo.Message, emote string) *discordgo.MessageReactions {
