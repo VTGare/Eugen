@@ -2,58 +2,108 @@ package main
 
 import (
 	"context"
+	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
-	"github.com/VTGare/Eugen/database"
-	"github.com/bwmarrin/discordgo"
-	log "github.com/sirupsen/logrus"
+	"github.com/VTGare/Eugen/arikawautils/middlewares"
+	"github.com/VTGare/Eugen/bot"
+	"github.com/VTGare/Eugen/commands"
+	"github.com/VTGare/Eugen/ctxzap"
+
+	"github.com/knadh/koanf/parsers/dotenv"
+	"github.com/knadh/koanf/parsers/json"
+	"github.com/knadh/koanf/providers/env"
+	"github.com/knadh/koanf/providers/file"
+	"github.com/knadh/koanf/v2"
+	"go.uber.org/zap"
 )
 
-var (
-	dg *discordgo.Session
-)
-
-func init() {
-	log.SetFormatter(&log.TextFormatter{})
-}
+var config = koanf.NewWithConf(koanf.Conf{
+	Delim:       ".",
+	StrictMerge: true,
+})
 
 func main() {
-	token := os.Getenv("BOT_TOKEN")
-	if token == "" {
-		log.Fatalln("BOT_TOKEN env variable doesn't exit")
+	if err := initializeConfig(); err != nil {
+		log.Fatalf("failed to intialize config: %v", err)
 	}
 
-	var err error
-	dg, err = discordgo.New("Bot " + token)
+	log, err := initializeLogger()
 	if err != nil {
-		log.Fatalln("Error creating a session: ", err)
+		log.Fatal("failed to initialize logger: %v", err)
 	}
 
-	dg.Identify.Intents = discordgo.IntentsGuildEmojis |
-		discordgo.IntentGuildMessageReactions |
-		discordgo.IntentGuildMessages |
-		discordgo.IntentMessageContent |
-		discordgo.IntentsDirectMessages
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill, syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
-	dg.AddHandler(onReady)
-	dg.AddHandler(messageCreated)
-	dg.AddHandler(guildCreated)
-	dg.AddHandler(reactCreated)
-	dg.AddHandler(guildDeleted)
-	dg.AddHandler(reactRemoved)
-	dg.AddHandler(allReactsRemoved)
-	dg.AddHandler(messageDeleted)
+	ctx = ctxzap.ToContext(ctx, log)
 
-	if err := dg.Open(); err != nil {
-		log.Fatalln("Error opening connection,", err)
+	b := bot.New(log, config)
+
+	b.AddMiddleware(middlewares.CommandLog(log))
+	commands.RegisterCommands(b)
+
+	if err := b.Start(ctx); err != nil {
+		log.With("error", err).Fatal("failed to start the bot")
 	}
-	defer dg.Close()
+}
 
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, syscall.SIGSEGV, syscall.SIGHUP)
-	<-sc
+func initializeLogger() (*zap.SugaredLogger, error) {
+	if config.Bool("dev.mode") {
+		log, err := zap.NewDevelopment()
+		if err != nil {
+			return nil, err
+		}
 
-	database.Client.Disconnect(context.Background())
+		return log.Sugar(), nil
+	}
+
+	log, err := zap.NewProduction()
+	if err != nil {
+		return nil, err
+	}
+
+	return log.Sugar(), nil
+}
+
+func initializeConfig() error {
+	// Load JSON config
+	jsonPath := "config.json"
+	if fileExists(jsonPath) {
+		if err := config.Load(file.Provider(jsonPath), json.Parser()); err != nil {
+			return err
+		}
+	}
+
+	// Load environment variables
+	err := config.Load(env.Provider("EUGEN_", ".", func(s string) string {
+		return strings.Replace(strings.ToLower(
+			strings.TrimPrefix(s, "EUGEN_")), "_", ".", -1)
+	}), nil)
+	if err != nil {
+		return err
+	}
+
+	// Load .env file
+	dotenvPath := ".env"
+	if fileExists(dotenvPath) {
+		dotenvParser := dotenv.ParserEnv("EUGEN_", ".", func(s string) string {
+			return strings.Replace(strings.ToLower(
+				strings.TrimPrefix(s, "EUGEN_")), "_", ".", -1)
+		})
+
+		if err := config.Load(file.Provider(".env"), dotenvParser); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func fileExists(filename string) bool {
+	_, err := os.Stat(filename)
+	return err == nil
 }
