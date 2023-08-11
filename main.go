@@ -32,6 +32,8 @@ func main() {
 	}
 
 	dg.Identify.Intents = discordgo.IntentsGuildEmojis |
+		discordgo.IntentsGuilds |
+		discordgo.IntentGuildMembers |
 		discordgo.IntentGuildMessageReactions |
 		discordgo.IntentGuildMessages |
 		discordgo.IntentMessageContent |
