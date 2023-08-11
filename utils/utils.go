@@ -14,7 +14,7 @@ import (
 
 var (
 	//TwitterRegex ...
-	TwitterRegex = regexp.MustCompile(`https?://(?:mobile.)?twitter.com/(\S+)/status/(\d+)(?:\?s=\d\d)?`)
+	TwitterRegex = regexp.MustCompile(`https?://(?:mobile.)?twitter.com/(\S+)/status/(\d+)(?:\/photo\/\d)?(?:\?\S+)`)
 	//ImageURLRegex is a regex for image URLs
 	ImageURLRegex = regexp.MustCompile(`(?i)(http(s?):)([/|.|\w|\s|-])*\.(?:jpg|jpeg|gif|png|webp)(?:(?:\?|&)\w+=\w+)*`)
 	//VideoURLRegex ...

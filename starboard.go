@@ -485,9 +485,9 @@ func (se *StarboardEvent) findURLs(content string) []*EugenURL {
 		}
 
 		switch {
-		case strings.HasSuffix(parsed.Path, "jpg") || strings.HasSuffix(parsed.Path, "png") || strings.HasSuffix(parsed.Path, "jpeg") || strings.HasSuffix(parsed.Path, "webp"):
+		case hasSuffixes(parsed.Path, "jpg", "png", "jpeg", "webp", "gif"):
 			eu.Type = ImageURL
-		case strings.HasSuffix(parsed.Path, "mp4") || strings.HasSuffix(parsed.Path, "webm") || strings.HasSuffix(parsed.Path, "mp4") || strings.HasSuffix(parsed.Path, "mov") || strings.HasSuffix(parsed.Path, "gifv"):
+		case hasSuffixes(parsed.Path, "mp4", "webm", "mov", "gifv"):
 			eu.Type = VideoURL
 		case strings.Contains(parsed.Host, "imgur"):
 			eu.Type = ImgurURL
@@ -585,4 +585,14 @@ func emojiURL(emoji *discordgo.Emoji) string {
 	}
 
 	return url
+}
+
+func hasSuffixes(str string, suffixes ...string) bool {
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(str, suffix) {
+			return true
+		}
+	}
+
+	return false
 }
