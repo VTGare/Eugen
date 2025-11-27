@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/VTGare/Eugen/database"
@@ -87,9 +88,9 @@ func messageCreated(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return "DMs"
 	}
 
-	var content = trimPrefix(m.Content, m.GuildID)
+	content := trimPrefix(m.Content, m.GuildID)
 
-	//if prefix wasn't trimmed
+	// if prefix wasn't trimmed
 	if content == m.Content {
 		return
 	}
@@ -133,6 +134,8 @@ func reactCreated(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
 				return
 			}
 
+			msg.GuildID = r.GuildID
+
 			if msg.Author != nil {
 				if msg.Author.ID == s.State.User.ID {
 					return
@@ -142,10 +145,8 @@ func reactCreated(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
 					return
 				}
 
-				for _, user := range guild.BlacklistedUsers {
-					if msg.Author.ID == user {
-						return
-					}
+				if slices.Contains(guild.BlacklistedUsers, msg.Author.ID) {
+					return
 				}
 			}
 
@@ -236,9 +237,7 @@ func allReactsRemoved(s *discordgo.Session, r *discordgo.MessageReactionRemoveAl
 }
 
 func messageDeleted(s *discordgo.Session, m *discordgo.MessageDelete) {
-	var (
-		guild, ok = database.GuildCache[m.GuildID]
-	)
+	guild, ok := database.GuildCache[m.GuildID]
 
 	if ok && guild.Enabled && guild.StarboardChannel != "" && !guild.IsBanned(m.ChannelID) {
 		se, err := newStarboardEventDeleted(s, m)

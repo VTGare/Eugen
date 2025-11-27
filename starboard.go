@@ -329,8 +329,16 @@ func createEmbed(
 	)
 
 	if len(message.MessageSnapshots) != 0 {
-		content = message.MessageSnapshots[0].Message.Content
-		file, modifyContent, err = messageContent(eb, message.MessageSnapshots[0].Message)
+		fmsg := message.MessageSnapshots[0].Message
+
+		content = fmsg.Content
+		file, modifyContent, err = messageContent(eb, fmsg)
+
+		eb.AddField("Forwarded message", fmt.Sprintf("https://discord.com/channels/%v/%v/%v",
+			fmsg.GuildID,
+			fmsg.ChannelID,
+			fmsg.ID,
+		))
 	} else {
 		content = message.Content
 		file, modifyContent, err = messageContent(eb, message)
