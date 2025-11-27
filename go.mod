@@ -1,6 +1,6 @@
 module github.com/VTGare/Eugen
 
-go 1.23
+go 1.25
 
 require (
 	github.com/VTGare/embeds v0.1.1
