@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -118,50 +120,62 @@ func (se *StarboardEvent) isSelfStar() (bool, error) {
 }
 
 func (se *StarboardEvent) createStarboard() error {
-	required := se.guild.StarsRequired(se.addEvent.ChannelID)
-	if react := se.React; react != nil {
-		if se.selfstar && !se.guild.Selfstar {
-			react.Count--
-		}
+	var (
+		react    = se.React
+		required = se.guild.StarsRequired(se.addEvent.ChannelID)
+	)
 
-		if react.Count >= required {
-			ch, err := se.session.Channel(se.message.ChannelID)
-			if err != nil {
-				return err
-			}
-
-			embed, resp, err := se.createEmbed(react, ch)
-			if err != nil {
-				return err
-			}
-
-			if embed != nil {
-				logrus.Infof("Creating a new starboard. Guild: %v, channel: %v, message: %v", se.guild.ID, se.addEvent.ChannelID, se.addEvent.MessageID)
-
-				starboardChannel := ""
-				if ch.NSFW && se.guild.NSFWStarboardChannel != "" {
-					starboardChannel = se.guild.NSFWStarboardChannel
-				} else {
-					starboardChannel = se.guild.StarboardChannel
-				}
-
-				starboard, err := se.session.ChannelMessageSendComplex(starboardChannel, embed)
-				if err != nil {
-					return err
-				}
-
-				if resp != nil {
-					resp.Body.Close()
-				}
-
-				handleError(se.session, se.addEvent.ChannelID, err)
-				oPair := database.NewPair(se.message.ChannelID, se.message.ID)
-				sPair := database.NewPair(starboard.ChannelID, starboard.ID)
-				err = database.InsertOneMessage(database.NewMessage(&oPair, &sPair, se.addEvent.GuildID))
-				handleError(se.session, se.addEvent.ChannelID, err)
-			}
-		}
+	if react == nil {
+		return nil
 	}
+
+	if se.selfstar && !se.guild.Selfstar {
+		react.Count--
+	}
+
+	if react.Count < required {
+		return nil
+	}
+
+	ch, err := se.session.Channel(se.message.ChannelID)
+	if err != nil {
+		return err
+	}
+
+	embed, err := createEmbed(se.guild, ch, se.message, react)
+	if err != nil {
+		return err
+	}
+
+	if embed == nil {
+		return nil
+	}
+
+	log := logrus.WithFields(logrus.Fields{
+		"guild":   se.guild.ID,
+		"channel": se.addEvent.ChannelID,
+		"message": se.addEvent.MessageID,
+	})
+
+	log.Debug("creating a new starboard")
+
+	starboardChannel := ""
+	if ch.NSFW && se.guild.NSFWStarboardChannel != "" {
+		starboardChannel = se.guild.NSFWStarboardChannel
+	} else {
+		starboardChannel = se.guild.StarboardChannel
+	}
+
+	starboard, err := se.session.ChannelMessageSendComplex(starboardChannel, embed)
+	if err != nil {
+		return err
+	}
+
+	handleError(se.session, se.addEvent.ChannelID, err)
+	oPair := database.NewPair(se.message.ChannelID, se.message.ID)
+	sPair := database.NewPair(starboard.ChannelID, starboard.ID)
+	err = database.InsertOneMessage(database.NewMessage(&oPair, &sPair, se.addEvent.GuildID))
+	handleError(se.session, se.addEvent.ChannelID, err)
 
 	return nil
 }
@@ -242,9 +256,7 @@ func (se *StarboardEvent) decrementStarboard() {
 }
 
 func (se *StarboardEvent) deleteStarboard() error {
-	var (
-		original = true
-	)
+	original := true
 
 	if se.board == nil {
 		original = false
@@ -283,192 +295,232 @@ func (se *StarboardEvent) deleteStarboard() error {
 	return nil
 }
 
-func (se *StarboardEvent) createEmbed(react *discordgo.MessageReactions, ch *discordgo.Channel) (*discordgo.MessageSend, *http.Response, error) {
+func createEmbed(
+	guild *database.Guild, ch *discordgo.Channel, message *discordgo.Message,
+	react *discordgo.MessageReactions,
+) (*discordgo.MessageSend, error) {
 	var (
 		eb         = embeds.NewBuilder()
-		resp       *http.Response
-		t          = se.message.Timestamp
-		messageURL = fmt.Sprintf("https://discord.com/channels/%v/%v/%v", se.addEvent.GuildID, se.addEvent.ChannelID, se.message.ID)
+		messageURL = fmt.Sprintf("https://discord.com/channels/%v/%v/%v", message.GuildID, message.ChannelID, message.ID)
 		msg        = &discordgo.MessageSend{}
-		content    = se.message.Content
 	)
 
-	urls := se.findURLs(se.message.Content)
-
-	eb.Author(fmt.Sprintf("@%v in #%v", se.message.Author.Username, ch.Name), messageURL, se.message.Author.AvatarURL(""))
-	eb.Color(int(se.guild.EmbedColour))
-	eb.Timestamp(t)
+	eb.Author(
+		fmt.Sprintf("@%v in #%v", message.Author.Username, ch.Name),
+		messageURL, message.Author.AvatarURL(""),
+	)
+	eb.Color(int(guild.EmbedColour))
+	eb.Timestamp(message.Timestamp)
 	eb.AddField("Original message", fmt.Sprintf("[Click here](%v)", messageURL), true)
 
-	if se.guild.IsGuildEmoji() {
+	if guild.IsGuildEmoji() {
 		text := fmt.Sprintf("%v", react.Count)
-		if se.selfstar && se.guild.Selfstar {
-			text += " | self-starred"
-		}
-
 		eb.Footer(text, emojiURL(react.Emoji))
 	} else {
 		text := fmt.Sprintf("%v %v", "⭐", react.Count)
-		if se.selfstar && se.guild.Selfstar {
-			text += " | self-starred"
-		}
-
 		eb.Footer(text, "")
 	}
 
-	if ref := se.message.MessageReference; ref != nil {
-		uri := fmt.Sprintf("https://discord.com/channels/%v/%v/%v", ref.GuildID, ref.ChannelID, ref.MessageID)
-		eb.AddField("Reply to", fmt.Sprintf("[Click here](%v)", uri), true)
+	var (
+		file          *discordgo.File
+		modifyContent modifyContentFunc
+		content       string
+		err           error
+	)
+
+	if len(message.MessageSnapshots) != 0 {
+		content = message.MessageSnapshots[0].Message.Content
+		file, modifyContent, err = messageContent(eb, message.MessageSnapshots[0].Message)
+	} else {
+		content = message.Content
+		file, modifyContent, err = messageContent(eb, message)
 	}
 
-	if len(se.message.StickerItems) != 0 {
-		sticker := se.message.StickerItems[0]
-		url := fmt.Sprintf("https://cdn.discordapp.com/stickers/%v.png", sticker.ID)
-		eb.Image(url)
+	if err != nil {
+		return nil, err
 	}
 
-	switch {
-	case len(se.message.Attachments) != 0:
-		var (
-			first = se.message.Attachments[0]
-			rest  = se.message.Attachments[1:]
-		)
+	if file != nil {
+		msg.Files = []*discordgo.File{file}
+	}
 
-		if utils.ImageURLRegex.MatchString(first.URL) {
-			eb.Image(first.URL)
+	if modifyContent != nil {
+		content = modifyContent(content)
+	}
+
+	if message.ReferencedMessage != nil {
+		content += "\n\n> Replying to <@" + message.ReferencedMessage.Author.ID + ">"
+		if message.ReferencedMessage.Content != "" {
+			content += "\n> \n> " + message.ReferencedMessage.Content
 		} else {
-			file, err := se.downloadFile(first.URL)
-			if err != nil {
-				return nil, nil, err
-			}
-
-			if file.Resp != nil {
-				resp = file.Resp
-				msg.Files = []*discordgo.File{
-					{
-						Name:   file.Name,
-						Reader: file.Resp.Body,
-					},
-				}
-			} else {
-				eb.AddField("Attachment", fmt.Sprintf("[Click here](%v)", first.URL), true)
-			}
-		}
-
-		for ind, a := range rest {
-			eb.AddField(fmt.Sprintf("Attachment %v", ind+2), fmt.Sprintf("[Click here](%v)", a.URL), true)
-		}
-	case len(urls) != 0:
-		switch urls[0].Type {
-		case ImageURL:
-			str := urls[0].URL.String()
-			eb.Image(str)
-			content = strings.Replace(content, str, "", 1)
-		case VideoURL:
-			uri := urls[0].URL.String()
-			if strings.HasSuffix(uri, "gifv") {
-				uri = strings.Replace(uri, "gifv", "mp4", 1)
-			}
-
-			video, err := se.downloadFile(uri)
-			if err != nil {
-				return nil, nil, err
-			}
-
-			if video.Resp != nil {
-				resp = video.Resp
-				msg.Files = []*discordgo.File{
-					{
-						Name:   video.Name,
-						Reader: video.Resp.Body,
-					},
-				}
-			} else {
-				eb.AddField("Attachment", fmt.Sprintf("[Click here](%v)", uri), true)
-			}
-			content = strings.Replace(content, uri, "", 1)
-		case TenorURL:
-			tenor := urls[0].URL.String()
-			res, err := services.Tenor(tenor)
-			if err != nil {
-				logrus.Warn(err)
-			} else if len(res.Media) != 0 {
-				content = strings.ReplaceAll(content, tenor, "")
-				eb.Image(res.Media[0].MediumGIF.URL)
-			}
-		case ImgurURL:
-			if len(se.message.Embeds) != 0 {
-				emb := se.message.Embeds[0]
-				if emb.Video != nil {
-					file, err := se.downloadFile(emb.Video.URL)
-					if err != nil {
-						logrus.Warnln("se.dowloadFile():", err)
-					}
-
-					if file.Resp != nil {
-						resp = file.Resp
-						msg.Files = []*discordgo.File{
-							{
-								Name:   file.Name,
-								Reader: file.Resp.Body,
-							},
-						}
-					} else if emb.Thumbnail != nil {
-						eb.Image(emb.Thumbnail.ProxyURL)
-					}
-				} else if emb.Thumbnail != nil {
-					eb.Image(emb.Thumbnail.ProxyURL)
-				}
-			} else {
-				eb.Image(fmt.Sprintf("https://i.imgur.com/%v.png", urls[0].URL.Path))
-			}
-
-			content = strings.Replace(content, urls[0].URL.String(), "", 1)
-		}
-	case len(se.message.Embeds) != 0:
-		emb := se.message.Embeds[0]
-		if emb.Footer != nil && strings.EqualFold(emb.Footer.Text, "twitter") {
-			if twitter := utils.TwitterRegex.FindString(se.message.Content); twitter != "" {
-				content = strings.Replace(content, twitter, "", 1)
-				content += fmt.Sprintf("\n[%v](%v)\n```\n%v\n```", emb.Author.Name, emb.Author.URL, emb.Description)
-				eb.AddField("Twitter", fmt.Sprintf("[Click here](%v)", twitter), true)
-			}
-
-			if emb.Image != nil {
-				eb.Image(emb.Image.URL)
-			}
-
-			if emb.Video != nil {
-				eb.AddField("Twitter video", fmt.Sprintf("[Click here](%v)", emb.Video.URL), true)
-			}
-		} else if emb.Provider != nil && strings.EqualFold(emb.Provider.Name, "youtube") {
-			eb.Image(emb.Thumbnail.URL)
-			yt := utils.YoutubeRegex.FindString(content)
-			content = strings.Replace(content, yt, "", 1)
-
-			content += "\n```" + emb.Title + "```"
-			eb.AddField("YouTube", fmt.Sprintf("[Click here](%v)", emb.URL), true)
-		} else {
-			if emb.Description != "" {
-				content += "\n"
-				if emb.Title != "" {
-					content += fmt.Sprintf("**%v**\n", emb.Title)
-				}
-				content += fmt.Sprintf("%v", emb.Description)
-			}
-
-			if emb.Image != nil && emb.Image.URL != "" {
-				eb.Image(emb.Image.URL)
-			}
+			url := fmt.Sprintf("https://discord.com/channels/%v/%v/%v",
+				message.ReferencedMessage.GuildID,
+				message.ReferencedMessage.ChannelID,
+				message.ReferencedMessage.ID,
+			)
+			eb.AddField("Reply to", url)
 		}
 	}
 
 	eb.Description(content)
-	msg.Embed = eb.Finalize()
-	return msg, resp, nil
+	embed := eb.Finalize()
+	msg.Embeds = []*discordgo.MessageEmbed{embed}
+
+	return msg, nil
 }
 
-func (se *StarboardEvent) findURLs(content string) []*EugenURL {
+type modifyContentFunc func(content string) string
+
+func messageContent(eb *embeds.Builder, message *discordgo.Message) (*discordgo.File, modifyContentFunc, error) {
+	// Apply sticker first. Anything else will override it.
+	if len(message.StickerItems) != 0 {
+		sticker := message.StickerItems[0]
+		url := fmt.Sprintf("https://cdn.discordapp.com/stickers/%v.png", sticker.ID)
+		eb.Image(url)
+	}
+
+	// Prioritize attachments over anything else.
+	if len(message.Attachments) != 0 {
+		return fromAttachments(eb, message)
+	}
+
+	urls := findURLs(message.Content)
+	if len(urls) != 0 {
+		return fromURL(eb, message, urls[0])
+	}
+
+	if len(message.Embeds) != 0 {
+		return fromEmbed(eb, message.Embeds[0])
+	}
+
+	return nil, nil, nil
+}
+
+func fromAttachments(eb *embeds.Builder, message *discordgo.Message) (*discordgo.File, modifyContentFunc, error) {
+	var (
+		first = message.Attachments[0]
+		rest  = message.Attachments[1:]
+		file  *discordgo.File
+	)
+
+	if utils.ImageURLRegex.MatchString(first.URL) {
+		eb.Image(first.URL)
+	} else {
+		var err error
+		file, err = downloadFile(first.URL)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if file == nil {
+			eb.AddField("Attachment", fmt.Sprintf("[Click here](%v)", first.URL), true)
+		}
+	}
+
+	for ind, a := range rest {
+		eb.AddField(fmt.Sprintf("Attachment %v", ind+2), fmt.Sprintf("[Click here](%v)", a.URL), true)
+	}
+
+	return file, nil, nil
+}
+
+func fromURL(eb *embeds.Builder, message *discordgo.Message, url *EugenURL) (*discordgo.File, modifyContentFunc, error) {
+	removeURL := func(content string) string {
+		return strings.Replace(content, url.URL.String(), "", 1)
+	}
+
+	if url.Type == URLTypeImage {
+		eb.Image(url.URL.String())
+		return nil, removeURL, nil
+	}
+
+	if url.Type == URLTypeVideo {
+		uri := url.URL.String()
+		if strings.HasSuffix(uri, "gifv") {
+			uri = strings.Replace(uri, "gifv", "mp4", 1)
+		}
+
+		file, err := downloadFile(uri)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if file == nil {
+			eb.AddField("Attachment", fmt.Sprintf("[Click here](%v)", uri), true)
+		}
+
+		return file, removeURL, nil
+	}
+
+	if url.Type == URLTypeTenor {
+		uri := url.URL.String()
+		res, err := services.Tenor(uri)
+		if err != nil {
+			return nil, nil, fmt.Errorf("tenor error: %w", err)
+		}
+
+		// Do nothing.
+		if len(res.Media) == 0 {
+			return nil, nil, nil
+		}
+
+		eb.Image(res.Media[0].MediumGIF.URL)
+		return nil, removeURL, nil
+	}
+
+	if url.Type == URLTypeImgur {
+		eb.Image(fmt.Sprintf("https://i.imgur.com/%v.png", url.URL.Path))
+		if len(message.Embeds) == 0 {
+			return nil, removeURL, nil
+		}
+
+		embed := message.Embeds[0]
+		if embed.Thumbnail != nil {
+			eb.Image(embed.Thumbnail.ProxyURL)
+		}
+	}
+
+	// If not one of supported URL types, do nothing.
+	return nil, nil, nil
+}
+
+func fromEmbed(eb *embeds.Builder, embed *discordgo.MessageEmbed) (*discordgo.File, modifyContentFunc, error) {
+	if embed.Image != nil {
+		eb.Image(embed.Image.URL)
+	}
+
+	if embed.Thumbnail != nil {
+		eb.Image(embed.Thumbnail.ProxyURL)
+	}
+
+	var file *discordgo.File
+	if embed.Video != nil {
+		eb.AddField("Embedded video", fmt.Sprintf("[Click here](%v)", embed.Video.URL), true)
+	}
+
+	contentFunc := func(content string) string {
+		if embed.Description == "" {
+			return content
+		}
+
+		content += "\n\n"
+
+		if embed.Title != "" {
+			content += fmt.Sprintf("> %v", embed.Title)
+		} else if embed.Author != nil {
+			content += fmt.Sprintf("> %v", embed.Author.Name)
+		}
+
+		description := strings.ReplaceAll(embed.Description, "\n", "\n> ")
+		content += "\n> \n> " + description
+
+		return content
+	}
+
+	return file, contentFunc, nil
+}
+
+func findURLs(content string) []*EugenURL {
 	var (
 		rx   = xurls.Strict()
 		urls = make([]*EugenURL, 0)
@@ -486,13 +538,13 @@ func (se *StarboardEvent) findURLs(content string) []*EugenURL {
 
 		switch {
 		case hasSuffixes(parsed.Path, "jpg", "png", "jpeg", "webp", "gif"):
-			eu.Type = ImageURL
+			eu.Type = URLTypeImage
 		case hasSuffixes(parsed.Path, "mp4", "webm", "mov", "gifv"):
-			eu.Type = VideoURL
+			eu.Type = URLTypeVideo
 		case strings.Contains(parsed.Host, "imgur"):
-			eu.Type = ImgurURL
+			eu.Type = URLTypeImgur
 		case strings.Contains(parsed.String(), "tenor.com/view"):
-			eu.Type = TenorURL
+			eu.Type = URLTypeTenor
 		default:
 			continue
 		}
@@ -533,47 +585,67 @@ func (se *StarboardEvent) editStarboard(msg *discordgo.Message, react *discordgo
 	return embed
 }
 
-func (se *StarboardEvent) downloadFile(uri string) (*StarboardFile, error) {
-	var (
-		file  = &StarboardFile{"", "", nil, nil}
-		limit = int64(8388608)
-	)
+func downloadFile(uri string) (*discordgo.File, error) {
+	allowed, err := checkFilesizeLimit(uri)
+	if err != nil {
+		return nil, fmt.Errorf("filesize limit: %w", err)
+	}
+
+	if !allowed {
+		return nil, nil
+	}
+
+	content, filename, err := getFile(uri)
+	if err != nil {
+		return nil, err
+	}
+
+	return &discordgo.File{
+		Name:   filename,
+		Reader: content,
+	}, nil
+}
+
+func checkFilesizeLimit(uri string) (bool, error) {
+	var limit int64 = 8388608
 
 	head, err := http.Head(uri)
 	if err != nil {
-		return nil, err
+		return false, fmt.Errorf("http head: %w", err)
 	}
 
-	g, err := se.session.Guild(se.addEvent.GuildID)
-	if err == nil {
-		if g.PremiumTier == discordgo.PremiumTier2 || g.PremiumTier == discordgo.PremiumTier3 {
-			limit = int64(52428800)
-		}
+	return head.ContentLength < limit, nil
+}
+
+// download file downloads a file from URL and returns its contents and filename.
+func getFile(uri string) (*bytes.Buffer, string, error) {
+	var filename string
+
+	lastSlash := strings.LastIndex(uri, "/")
+	querySeparator := strings.LastIndex(uri, "?")
+
+	if querySeparator != -1 && querySeparator > lastSlash {
+		filename = uri[lastSlash:querySeparator]
 	} else {
-		logrus.Warnf("downloadFile(): %v", err)
+		filename = uri[lastSlash:]
 	}
 
-	//if Content-Length is larger than 8MB | 50MB depending on boost level
-	if head.ContentLength >= limit {
-		file.URL = uri
-		return file, nil
-	}
+	filename = strings.TrimPrefix(filename, "/")
 
 	resp, err := http.Get(uri)
 	if err != nil {
-		return nil, err
-	}
-	begin := strings.LastIndex(uri, "/")
-	end := strings.LastIndex(uri, "?")
-	if end != -1 && end > begin {
-		file.Name = uri[begin:end]
-	} else {
-		file.Name = uri[begin:]
+		return nil, "", fmt.Errorf("http get: %w", err)
 	}
 
-	file.Resp = resp
+	defer resp.Body.Close()
 
-	return file, nil
+	var buf bytes.Buffer
+	_, err = io.Copy(&buf, resp.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("io copy: %w", err)
+	}
+
+	return &buf, filename, nil
 }
 
 func emojiURL(emoji *discordgo.Emoji) string {

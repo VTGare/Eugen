@@ -5,10 +5,10 @@ import "net/url"
 type URLType int
 
 const (
-	ImageURL URLType = iota
-	VideoURL
-	TenorURL
-	ImgurURL
+	URLTypeImage URLType = iota
+	URLTypeVideo
+	URLTypeTenor
+	URLTypeImgur
 )
 
 func (t URLType) String() string {

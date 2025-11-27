@@ -13,25 +13,23 @@ import (
 )
 
 var (
-	//TwitterRegex ...
-	TwitterRegex = regexp.MustCompile(`https?://(?:mobile.)?twitter.com/(\S+)/status/(\d+)(?:\/photo\/\d)?(?:\?\S+)`)
-	//ImageURLRegex is a regex for image URLs
+	// ImageURLRegex is a regex for image URLs
 	ImageURLRegex = regexp.MustCompile(`(?i)(http(s?):)([/|.|\w|\s|-])*\.(?:jpg|jpeg|gif|png|webp)(?:(?:\?|&)\w+=\w+)*`)
-	//VideoURLRegex ...
+	// VideoURLRegex ...
 	VideoURLRegex = regexp.MustCompile(`(?i)(?:http(?:s?):)(?:[/|.|\w|\s|-])*\.(mp4|webm|mov|gifv)(?:(?:\?|&)\w+=\w+)*`)
-	//YoutubeRegex ...
+	// YoutubeRegex ...
 	YoutubeRegex = regexp.MustCompile(`(?i)https?:\/\/(?:www\.)?youtu(?:be)?\.(?:com|be)\/(?:watch\?v=)?\S+`)
-	//NumRegex is a terrible number regex. Gonna replace it with better code.
+	// NumRegex is a terrible number regex. Gonna replace it with better code.
 	NumRegex = regexp.MustCompile(`([0-9]+)`)
-	//EmojiRegex matches some Unicode emojis, it's not perfect but better than nothing
+	// EmojiRegex matches some Unicode emojis, it's not perfect but better than nothing
 	EmojiRegex = regexp.MustCompile(`(\x{00a9}|\x{00ae}|[\x{2000}-\x{3300}]|\x{d83c}[\x{d000}-\x{dfff}]|\x{d83d}[\x{d000}-\x{dfff}]|\x{d83e}[\x{d000}-\x{dfff}])`)
-	//EmbedColor is a default Discord embed color
+	// EmbedColor is a default Discord embed color
 	EmbedColor = 16744576
-	//ErrNotEnoughArguments is a default error when not enough arguments were given
+	// ErrNotEnoughArguments is a default error when not enough arguments were given
 	ErrNotEnoughArguments = errors.New("not enough arguments")
-	//ErrParsingArgument is a default error when provided arguments couldn't be parsed
+	// ErrParsingArgument is a default error when provided arguments couldn't be parsed
 	ErrParsingArgument = errors.New("error parsing arguments, please make sure all arguments are integers")
-	//ErrNoPermission is a default error when user doesn't have enough permissions to execute a command
+	// ErrNoPermission is a default error when user doesn't have enough permissions to execute a command
 	ErrNoPermission = errors.New("you don't have permissions to execute this command")
 )
 
@@ -172,7 +170,7 @@ func CreatePrompt(s *discordgo.Session, m *discordgo.MessageCreate, embed *disco
 	var msg *discordgo.MessageCreate
 	for {
 		select {
-		case m := <-nextMessageCreate(s, m.ChannelID):
+		case m := <-nextMessageCreate(s):
 			msg = m
 		case <-time.After(2 * time.Minute):
 			s.ChannelMessageDelete(prompt.ChannelID, prompt.ID)
@@ -188,7 +186,7 @@ func CreatePrompt(s *discordgo.Session, m *discordgo.MessageCreate, embed *disco
 	}
 }
 
-func nextMessageCreate(s *discordgo.Session, channelID string) chan *discordgo.MessageCreate {
+func nextMessageCreate(s *discordgo.Session) chan *discordgo.MessageCreate {
 	out := make(chan *discordgo.MessageCreate)
 	s.AddHandlerOnce(func(_ *discordgo.Session, e *discordgo.MessageCreate) {
 		out <- e
