@@ -1,4 +1,4 @@
-package bot
+package embed
 
 import "net/url"
 

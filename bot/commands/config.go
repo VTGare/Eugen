@@ -297,18 +297,6 @@ func set(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string
 					return errors.New("can't assign starboard to a channel from a foreign server")
 				}
 				passedSetting = newSetting
-			case "nsfwstarboard":
-				if chID, ok := strings.CutPrefix(newSetting, "<#"); ok {
-					newSetting = strings.TrimSuffix(chID, ">")
-				}
-				ch, err := s.Channel(newSetting)
-				if err != nil {
-					return err
-				}
-				if ch.GuildID != m.GuildID {
-					return errors.New("can't assign starboard to a channel from a foreign server")
-				}
-				passedSetting = newSetting
 			default:
 				return errors.New("unknown setting " + setting)
 			}
@@ -348,7 +336,7 @@ func showGuildSettings(s *discordgo.Session, m *discordgo.MessageCreate, b *bot.
 		Fields: []*discordgo.MessageEmbedField{
 			{
 				Name:  "Starboard",
-				Value: fmt.Sprintf("**%v**\n**Starboard channel:** %v\n**NSFW starboard channel:** %v", utils.FormatBool(settings.Enabled), utils.FormatChannel(settings.StarboardChannel), utils.FormatChannel(settings.NSFWStarboardChannel)),
+				Value: fmt.Sprintf("**%v**\n**Starboard channel:** %v", utils.FormatBool(settings.Enabled), utils.FormatChannel(settings.StarboardChannel)),
 			},
 			{
 				Name:  "General settings",

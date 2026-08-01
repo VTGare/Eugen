@@ -4,7 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"regexp"
+	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -12,16 +13,6 @@ import (
 )
 
 var (
-	// ImageURLRegex is a regex for image URLs
-	ImageURLRegex = regexp.MustCompile(`(?i)(http(s?):)([/|.|\\w|\\s|-])*\\.(?:jpg|jpeg|gif|png|webp)(?:(?:\\?|&)\\w+=\\w+)*`)
-	// VideoURLRegex ...
-	VideoURLRegex = regexp.MustCompile(`(?i)(?:http(?:s?):)(?:[/|.|\\w|\\s|-])*\\.(mp4|webm|mov|gifv)(?:(?:\\?|&)\\w+=\\w+)*`)
-	// YoutubeRegex ...
-	YoutubeRegex = regexp.MustCompile(`(?i)https?:\\/\\/(?:www\\.)?youtu(?:be)?\\.(?:com|be)\\/(?:watch\\?v=)?\\S+`)
-	// NumRegex is a terrible number regex. Gonna replace it with better code.
-	NumRegex = regexp.MustCompile(`([0-9]+)`)
-	// EmojiRegex matches some Unicode emojis, it's not perfect but better than nothing
-	EmojiRegex = regexp.MustCompile(`(\\x{00a9}|\\x{00ae}|[\\x{2000}-\\x{3300}]|\\x{d83c}[\\x{d000}-\\x{dfff}]|\\x{d83d}[\\x{d000}-\\x{dfff}]|\\x{d83e}[\\x{d000}-\\x{dfff}])`)
 	// EmbedColor is a default Discord embed color
 	EmbedColor = 16744576
 	// ErrNotEnoughArguments is a default error when not enough arguments were given
@@ -29,8 +20,49 @@ var (
 	// ErrParsingArgument is a default error when provided arguments couldn't be parsed
 	ErrParsingArgument = errors.New("error parsing arguments, please make sure all arguments are integers")
 	// ErrNoPermission is a default error when user doesn't have enough permissions to execute a command
-	ErrNoPermission = errors.New("you don't have permissions to execute this command")
+	ErrNoPermission = errors.New("you don't have enough permission to execute this command")
 )
+
+var (
+	// imageExtensions covers all image formats Discord supports for embeds:
+	// https://discord.com/developers/docs/reference#image-resource-limits
+	imageExtensions = []string{
+		".apng", ".avif", ".bmp", ".gif", ".jpg", ".jpeg",
+		".png", ".svg", ".tiff", ".tif", ".webp",
+	}
+	// videoExtensions covers all video formats Discord supports for embeds.
+	videoExtensions = []string{
+		".mp4", ".webm", ".mov", ".avi", ".mkv", ".wmv", ".mpg", ".mpeg", ".gifv",
+	}
+)
+
+// IsImageURL reports whether the given URL points to an image file based
+// on its path extension. Query strings and fragments are ignored.
+func IsImageURL(uri string) bool {
+	return hasExtension(uri, imageExtensions)
+}
+
+// IsVideoURL reports whether the given URL points to a video file based
+// on its path extension. Query strings and fragments are ignored.
+func IsVideoURL(uri string) bool {
+	return hasExtension(uri, videoExtensions)
+}
+
+// hasExtension parses the URL and checks if the path has one of the given
+// extensions (case-insensitive). Returns false if the URL is malformed.
+func hasExtension(uri string, exts []string) bool {
+	parsed, err := url.Parse(uri)
+	if err != nil {
+		return false
+	}
+	ext := strings.ToLower(path.Ext(parsed.Path))
+	for _, e := range exts {
+		if ext == e {
+			return true
+		}
+	}
+	return false
+}
 
 // EmbedTimestamp returns currect time formatted to RFC3339 for Discord embeds
 func EmbedTimestamp() string {

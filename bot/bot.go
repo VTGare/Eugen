@@ -8,21 +8,22 @@ import (
 	"time"
 
 	"github.com/VTGare/Eugen/bot/registry"
+	"github.com/VTGare/Eugen/bot/starboard"
 	"github.com/VTGare/Eugen/store"
 	"github.com/VTGare/Eugen/utils"
 	"github.com/bwmarrin/discordgo"
 )
 
 // Bot is the central application struct. It holds the Discord session,
-// the persistence store, the command registry, and the starboard event
-// queue. Event handlers and commands are created as closures bound to a
-// *Bot instance via constructor functions.
+// the persistence store, the command registry, and the starboard engine.
+// Event handlers and commands are created as closures bound to a *Bot
+// instance via constructor functions.
 type Bot struct {
 	mu         sync.Mutex
 	Session    *discordgo.Session
 	Store      *store.Store
 	Registry   *registry.Registry
-	Queue      map[store.MessagePair]chan *StarboardEvent
+	Starboard  *starboard.Starboarder
 	Config     Config
 	botMention string
 	log        *slog.Logger
@@ -42,20 +43,28 @@ func New(st *store.Store, config Config, logger *slog.Logger) *Bot {
 		logger = slog.Default()
 	}
 
-	return &Bot{
+	b := &Bot{
 		Store:    st,
 		Config:   config,
-		Queue:    make(map[store.MessagePair]chan *StarboardEvent),
 		Registry: registry.New(),
 		log:      logger,
 	}
+	return b
+}
+
+// SetStarboarder injects the starboard engine. Called after session creation
+// so the Starboarder can access the discordgo.Session.
+func (b *Bot) SetStarboarder(sb *starboard.Starboarder) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.Starboard = sb
 }
 
 // SetMention sets the bot mention string (called when the session is ready).
 func (b *Bot) SetMention(mention string) {
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.botMention = mention
-	b.mu.Unlock()
 }
 
 // Mention returns the cached bot mention.
@@ -108,37 +117,26 @@ func (b *Bot) InitGuilds(eventGuilds []*discordgo.Guild) {
 }
 
 // TrimPrefix removes the command prefix from a message content string.
+// If the content does not start with any known prefix, it is returned unchanged.
 func (b *Bot) TrimPrefix(content, guildID string) string {
-	return b.trimPrefix(content, guildID)
-}
-
-func (b *Bot) trimPrefix(content, guildID string) string {
 	guild := b.Store.Guilds.Cache().Get(guildID)
-	var defaultPrefix bool
-	if guild != nil && guild.Prefix == "e!" {
-		defaultPrefix = true
-	} else if guild == nil {
-		defaultPrefix = true
-	} else {
-		defaultPrefix = false
-	}
 
 	switch {
 	case startsWithMention(content, b.botMention):
 		return trimPrefix(content, b.botMention)
-	case defaultPrefix:
+	case guild != nil && guild.Prefix != "e!":
+		if hasPrefix(content, guild.Prefix) {
+			return trimPrefix(content, guild.Prefix)
+		}
+		return content
+	default:
 		for _, prefix := range b.Config.Prefixes {
 			if hasPrefix(content, prefix) {
 				return trimPrefix(content, prefix)
 			}
 		}
-	case !defaultPrefix && guild != nil:
-		return trimPrefix(content, guild.Prefix)
-	default:
 		return content
 	}
-
-	return content
 }
 
 // HandleError logs and optionally notifies about a Discord error.
@@ -150,103 +148,12 @@ func (b *Bot) HandleError(s *discordgo.Session, channelID string, err error) {
 			Thumbnail: &discordgo.MessageEmbedThumbnail{
 				URL: "https://i.imgur.com/OZ1Al5h.png",
 			},
-			Description: fmt.Sprintf("***Error message:***\\n%v\\n", err),
+			Description: fmt.Sprintf("***Error message:***\n%v\n", err),
 			Color:       utils.EmbedColor,
 			Timestamp:   utils.EmbedTimestamp(),
 		}
 		s.ChannelMessageSendEmbed(channelID, embed)
 	}
-}
-
-// Push enqueues a starboard event for processing.
-func (b *Bot) Push(pair store.MessagePair, event *StarboardEvent) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	ch, ok := b.Queue[pair]
-	if ok {
-		ch <- event
-	} else {
-		ch = make(chan *StarboardEvent)
-		b.Queue[pair] = ch
-		go b.consume(pair, ch)
-		ch <- event
-	}
-}
-
-// consume processes starboard events from a channel sequentially.
-func (b *Bot) consume(pair store.MessagePair, ch chan *StarboardEvent) {
-	for e := range ch {
-		if err := e.Run(); err != nil {
-			b.log.Warn("starboard event error", "err", err)
-		}
-	}
-}
-
-func startsWithMention(content, mention string) bool {
-	return len(content) >= len(mention) && content[:len(mention)] == mention
-}
-
-func trimPrefix(content, prefix string) string {
-	return content[len(prefix):]
-}
-
-func hasPrefix(content, prefix string) bool {
-	return len(content) >= len(prefix) && content[:len(prefix)] == prefix
-}
-
-// FindReact finds a reaction on a message that matches the given emote.
-func (b *Bot) FindReact(message *discordgo.Message, emote string) *discordgo.MessageReactions {
-	for _, r := range message.Reactions {
-		if r.Emoji.MessageFormat() == emote {
-			return r
-		}
-	}
-	return nil
-}
-
-// NewStarboardEventAdd creates a StarboardEvent for a reaction add.
-func (b *Bot) NewStarboardEventAdd(s *discordgo.Session, r *discordgo.MessageReactionAdd, msg *discordgo.Message, react *discordgo.MessageReactions) (*StarboardEvent, error) {
-	guild := b.Store.Guilds.Cache().Get(r.GuildID)
-	se := &StarboardEvent{
-		Guild:       guild,
-		Message:     msg,
-		Session:     s,
-		AddEvent:    r,
-		React:       react,
-		Store:       b.Store,
-		log:         b.log.With("guild_id", guild.ID),
-	}
-	return se, nil
-}
-
-// NewStarboardEventRemove creates a StarboardEvent for a reaction remove.
-func (b *Bot) NewStarboardEventRemove(s *discordgo.Session, r *discordgo.MessageReactionRemove, msg *discordgo.Message) (*StarboardEvent, error) {
-	guild := b.Store.Guilds.Cache().Get(r.GuildID)
-	emote := b.FindReact(msg, guild.StarEmote)
-	se := &StarboardEvent{
-		Guild:       guild,
-		Message:     msg,
-		Session:     s,
-		RemoveEvent: r,
-		React:       emote,
-		Store:       b.Store,
-		log:         b.log.With("guild_id", guild.ID),
-	}
-	return se, nil
-}
-
-// NewStarboardEventDeleted creates a StarboardEvent for a message delete.
-func (b *Bot) NewStarboardEventDeleted(s *discordgo.Session, d *discordgo.MessageDelete) (*StarboardEvent, error) {
-	guild := b.Store.Guilds.Cache().Get(d.GuildID)
-	return &StarboardEvent{
-		Guild:       guild,
-		Message:     &discordgo.Message{ID: d.ID, ChannelID: d.ChannelID},
-		Session:     s,
-		DeleteEvent: d,
-		Store:       b.Store,
-		log:         b.log.With("guild_id", guild.ID),
-	}, nil
 }
 
 // RegisterHandler is a convenience for registering a discordgo handler.
@@ -311,4 +218,16 @@ func (b *Bot) LoadGuildCache() {
 	} else {
 		b.log.Info("cached guilds", "count", n)
 	}
+}
+
+func startsWithMention(content, mention string) bool {
+	return len(content) >= len(mention) && content[:len(mention)] == mention
+}
+
+func trimPrefix(content, prefix string) string {
+	return content[len(prefix):]
+}
+
+func hasPrefix(content, prefix string) bool {
+	return len(content) >= len(prefix) && content[:len(prefix)] == prefix
 }

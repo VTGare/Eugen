@@ -10,6 +10,7 @@ import (
 	"github.com/VTGare/Eugen/bot"
 	"github.com/VTGare/Eugen/bot/commands"
 	"github.com/VTGare/Eugen/bot/handlers"
+	"github.com/VTGare/Eugen/bot/starboard"
 	"github.com/VTGare/Eugen/config"
 	"github.com/VTGare/Eugen/store"
 )
@@ -38,6 +39,9 @@ func main() {
 		log.Error("creating session", "err", err)
 		os.Exit(1)
 	}
+
+	// Create and inject the starboard engine after the session is ready.
+	b.SetStarboarder(starboard.New(b.Session, st, log))
 
 	// Register event handlers.
 	s := b.Session
