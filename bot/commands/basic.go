@@ -2,10 +2,13 @@ package commands
 
 import (
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/VTGare/Eugen/bot"
+	"github.com/VTGare/Eugen/bot/registry"
 	"github.com/VTGare/Eugen/utils"
+	"github.com/VTGare/embeds"
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -15,7 +18,7 @@ func ping(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []strin
 		embed.Title = "🏓 Pong!"
 		embed.Fields = []*discordgo.MessageEmbedField{{
 			Name:   "Heartbeat latency",
-			Value:  fmt.Sprintf("%v", s.HeartbeatLatency().Round(1 * time.Millisecond)),
+			Value:  fmt.Sprintf("%v", s.HeartbeatLatency().Round(1*time.Millisecond)),
 			Inline: true,
 		}}
 
@@ -26,63 +29,101 @@ func ping(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []strin
 
 func help(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string) error {
 	return func(s *discordgo.Session, m *discordgo.MessageCreate, args []string) error {
-		guild := b.Store.Guilds.Cache().Get(m.GuildID)
-		var prefix string
-		if guild != nil {
-			prefix = guild.Prefix
-		} else {
-			prefix = "e!"
-		}
-
-		embed := &discordgo.MessageEmbed{
-			Description: fmt.Sprintf("Use ``%vhelp <command name>`` for extended help on specific commands.", prefix),
-			Color:       utils.EmbedColor,
-			Timestamp:   utils.EmbedTimestamp(),
-			Thumbnail: &discordgo.MessageEmbedThumbnail{
-				URL: "https://i.imgur.com/OZ1Al5h.png",
-			},
-		}
+		prefix := defaultPrefix(b, m.GuildID)
 
 		switch len(args) {
 		case 0:
-			embed.Title = "Help"
-			for _, group := range b.Registry.Groups() {
-				if group.IsVisible {
-					seen := make(map[string]bool)
-					for _, command := range group.Commands {
-						if !seen[command.Name] {
-							embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-								Name:   command.Name,
-								Value:  command.CreateHelp(prefix),
-								Inline: false,
-							})
-							seen[command.Name] = true
-						}
-					}
-				}
-			}
+			return sendCommandList(s, m, b, prefix)
 		case 1:
-			found := false
-			for _, group := range b.Registry.Groups() {
-				if command, ok := group.Commands[args[0]]; ok {
-					if len(command.CreateExtendedHelp(prefix)) > 0 && command.Help.IsVisible {
-						found = true
-						embed.Title = fmt.Sprintf("%v command extended help", command.Name)
-						embed.Fields = command.CreateExtendedHelp(prefix)
-					}
-				}
-			}
-			if !found {
-				s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Command %v either doesn't have extended help info or doesn't exist.", args[0]))
-				return nil
-			}
+			return sendCommandHelp(s, m, b, prefix, args[0])
 		default:
-			return fmt.Errorf("incorrect command usage. Example: e!help <command name>")
+			return fmt.Errorf("incorrect command usage. Example: ``%vhelp <command name>``", prefix)
 		}
-
-		s.ChannelMessageSendEmbed(m.ChannelID, embed)
-		return nil
 	}
+}
+
+// defaultPrefix returns the guild's custom prefix if set, otherwise "e!".
+func defaultPrefix(b *bot.Bot, guildID string) string {
+	guild := b.Store.Guilds.Cache().Get(guildID)
+	if guild != nil && guild.Prefix != "" {
+		return guild.Prefix
+	}
+	return "e!"
+}
+
+// sendCommandList builds a flattened embed listing every visible command
+// across all groups. Group headers are intentionally omitted: the help command
+// only resolves command names, never group names. Commands are sorted
+// alphabetically by name for deterministic output.
+func sendCommandList(s *discordgo.Session, m *discordgo.MessageCreate, b *bot.Bot, prefix string) error {
+	eb := embeds.NewBuilder().
+		Title("Commands").
+		Description(fmt.Sprintf("Use ``%vhelp <command name>`` for extended help on a specific command.", prefix)).
+		Color(utils.EmbedColor).
+		Thumbnail(s.State.User.AvatarURL("")).
+		Timestamp(time.Now())
+
+	// Collect deduplicated commands, then sort alphabetically for stable output.
+	seen := make(map[string]bool)
+	commands := make([]*registry.Command, 0)
+	for _, group := range b.Registry.Groups() {
+		if !group.IsVisible {
+			continue
+		}
+		for _, command := range group.Commands {
+			if seen[command.Name] {
+				continue
+			}
+			seen[command.Name] = true
+			commands = append(commands, command)
+		}
+	}
+
+	sort.Slice(commands, func(i, j int) bool {
+		return commands[i].Name < commands[j].Name
+	})
+
+	for _, command := range commands {
+		eb.AddField(command.Name, command.CreateHelp(prefix), true)
+	}
+
+	_, err := s.ChannelMessageSendEmbed(m.ChannelID, eb.Finalize())
+	return err
+}
+
+// sendCommandHelp resolves a single command by name and sends its
+// extended help embed.
+func sendCommandHelp(s *discordgo.Session, m *discordgo.MessageCreate, b *bot.Bot, prefix, name string) error {
+	command := b.Registry.Get(name)
+	if command == nil {
+		eb := embeds.NewBuilder().
+			ErrorTemplate(fmt.Sprintf("Unknown command: ``%v``.", name)).
+			Timestamp(time.Now())
+		_, err := s.ChannelMessageSendEmbed(m.ChannelID, eb.Finalize())
+		return err
+	}
+
+	extended := command.CreateExtendedHelp(prefix)
+	if len(extended) == 0 {
+		eb := embeds.NewBuilder().
+			ErrorTemplate(fmt.Sprintf("Command ``%v`` has no extended help available.", command.Name)).
+			Timestamp(time.Now())
+		_, err := s.ChannelMessageSendEmbed(m.ChannelID, eb.Finalize())
+		return err
+	}
+
+	eb := embeds.NewBuilder().
+		Title(fmt.Sprintf("%v - help", command.Name)).
+		Color(utils.EmbedColor).
+		Thumbnail(s.State.User.AvatarURL("")).
+		Timestamp(time.Now())
+
+	for _, field := range extended {
+		eb.AddField(field.Name, field.Value, false)
+	}
+
+	_, err := s.ChannelMessageSendEmbed(m.ChannelID, eb.Finalize())
+	return err
 }
 
 func invite(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string) error {

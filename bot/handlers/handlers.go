@@ -59,12 +59,9 @@ func MessageCreate(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate
 	}
 }
 
-// commandMatch checks if the given name matches the command name or aliases.
+// commandMatch checks if the given name matches the command name.
 func commandMatch(cmd *registry.Command, name string) bool {
-	if cmd.Name == name {
-		return true
-	}
-	return slices.Contains(cmd.Aliases, name)
+	return cmd.Name == name
 }
 
 // MessageReactionAdd returns a handler for the discordgo.MessageReactionAdd event.

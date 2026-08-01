@@ -1,7 +1,6 @@
 package registry
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
@@ -10,7 +9,6 @@ import (
 // Command defines a single bot command.
 type Command struct {
 	Name        string
-	Aliases     []string
 	Description string
 	GuildOnly   bool
 	Help        *HelpSettings
@@ -31,15 +29,13 @@ type CommandGroup struct {
 }
 
 type Registry struct {
-	groups  map[string]*CommandGroup
-	aliases map[string]*Command // alias -> command lookup
+	groups map[string]*CommandGroup
 }
 
 // New creates an empty Registry.
 func New() *Registry {
 	return &Registry{
-		groups:  make(map[string]*CommandGroup),
-		aliases: make(map[string]*Command),
+		groups: make(map[string]*CommandGroup),
 	}
 }
 
@@ -47,18 +43,11 @@ func (r *Registry) Add(name string, g *CommandGroup) {
 	if g.Commands == nil {
 		g.Commands = make(map[string]*Command)
 	}
+
 	r.groups[name] = g
-	for _, cmd := range g.Commands {
-		for _, alias := range cmd.Aliases {
-			r.aliases[alias] = cmd
-		}
-	}
 }
 
 func (r *Registry) Get(name string) *Command {
-	if cmd, ok := r.aliases[name]; ok {
-		return cmd
-	}
 	for _, g := range r.groups {
 		if cmd, ok := g.Commands[name]; ok {
 			return cmd
@@ -80,19 +69,23 @@ func (r *Registry) Group(name string) *CommandGroup {
 }
 
 func (c *Command) CreateHelp(prefix string) string {
-	str := ""
-	if len(c.Aliases) != 0 {
-		str += fmt.Sprintf("**Aliases:** %v\n", strings.Join(c.Aliases, ", "))
-	}
-	str += strings.ReplaceAll(c.Description, "{prefix}", prefix)
-	return str
+	return strings.ReplaceAll(c.Description, "{prefix}", prefix)
 }
 
 func (c *Command) CreateExtendedHelp(prefix string) []*discordgo.MessageEmbedField {
 	n := make([]*discordgo.MessageEmbedField, 0)
-	if c.Help == nil {
+	if c.Help == nil || len(c.Help.ExtendedHelp) == 0 {
 		return n
 	}
+
+	if c.GuildOnly {
+		n = append(n, &discordgo.MessageEmbedField{
+			Name:   "Permissions",
+			Value:  "🔒 This command is **guild-only** and cannot be used in DMs.",
+			Inline: false,
+		})
+	}
+
 	for _, h := range c.Help.ExtendedHelp {
 		n = append(n, &discordgo.MessageEmbedField{
 			Name:   h.Name,
