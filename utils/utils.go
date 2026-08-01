@@ -3,26 +3,25 @@ package utils
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
 
-	"github.com/VTGare/Eugen/database"
 	"github.com/bwmarrin/discordgo"
-	log "github.com/sirupsen/logrus"
 )
 
 var (
 	// ImageURLRegex is a regex for image URLs
-	ImageURLRegex = regexp.MustCompile(`(?i)(http(s?):)([/|.|\w|\s|-])*\.(?:jpg|jpeg|gif|png|webp)(?:(?:\?|&)\w+=\w+)*`)
+	ImageURLRegex = regexp.MustCompile(`(?i)(http(s?):)([/|.|\\w|\\s|-])*\\.(?:jpg|jpeg|gif|png|webp)(?:(?:\\?|&)\\w+=\\w+)*`)
 	// VideoURLRegex ...
-	VideoURLRegex = regexp.MustCompile(`(?i)(?:http(?:s?):)(?:[/|.|\w|\s|-])*\.(mp4|webm|mov|gifv)(?:(?:\?|&)\w+=\w+)*`)
+	VideoURLRegex = regexp.MustCompile(`(?i)(?:http(?:s?):)(?:[/|.|\\w|\\s|-])*\\.(mp4|webm|mov|gifv)(?:(?:\\?|&)\\w+=\\w+)*`)
 	// YoutubeRegex ...
-	YoutubeRegex = regexp.MustCompile(`(?i)https?:\/\/(?:www\.)?youtu(?:be)?\.(?:com|be)\/(?:watch\?v=)?\S+`)
+	YoutubeRegex = regexp.MustCompile(`(?i)https?:\\/\\/(?:www\\.)?youtu(?:be)?\\.(?:com|be)\\/(?:watch\\?v=)?\\S+`)
 	// NumRegex is a terrible number regex. Gonna replace it with better code.
 	NumRegex = regexp.MustCompile(`([0-9]+)`)
 	// EmojiRegex matches some Unicode emojis, it's not perfect but better than nothing
-	EmojiRegex = regexp.MustCompile(`(\x{00a9}|\x{00ae}|[\x{2000}-\x{3300}]|\x{d83c}[\x{d000}-\x{dfff}]|\x{d83d}[\x{d000}-\x{dfff}]|\x{d83e}[\x{d000}-\x{dfff}])`)
+	EmojiRegex = regexp.MustCompile(`(\\x{00a9}|\\x{00ae}|[\\x{2000}-\\x{3300}]|\\x{d83c}[\\x{d000}-\\x{dfff}]|\\x{d83d}[\\x{d000}-\\x{dfff}]|\\x{d83e}[\\x{d000}-\\x{dfff}])`)
 	// EmbedColor is a default Discord embed color
 	EmbedColor = 16744576
 	// ErrNotEnoughArguments is a default error when not enough arguments were given
@@ -36,34 +35,6 @@ var (
 // EmbedTimestamp returns currect time formatted to RFC3339 for Discord embeds
 func EmbedTimestamp() string {
 	return time.Now().Format(time.RFC3339)
-}
-
-func CreateDB(eventGuilds []*discordgo.Guild) error {
-	allGuilds := database.AllGuilds()
-	for _, guild := range allGuilds {
-		database.GuildCache[guild.ID] = guild
-	}
-
-	newGuilds := make([]interface{}, 0)
-	for _, guild := range eventGuilds {
-		if _, ok := database.GuildCache[guild.ID]; !ok {
-			log.Infoln(guild.ID, "not found in database. Adding...")
-			g := database.NewGuild(guild.Name, guild.ID)
-			newGuilds = append(newGuilds, g)
-			database.GuildCache[g.ID] = g
-		}
-	}
-
-	if len(newGuilds) > 0 {
-		err := database.InsertManyGuilds(newGuilds)
-		if err != nil {
-			return err
-		}
-		log.Infoln("Successfully inserted all current guilds.")
-	}
-
-	log.Infoln(fmt.Sprintf("Connected to %v guilds", len(eventGuilds)))
-	return nil
 }
 
 // MemberHasPermission checks if guild member has a permission to do something on a server.
@@ -100,7 +71,7 @@ func MemberHasPermission(s *discordgo.Session, guildID string, userID string, pe
 func IsValidChannel(s *discordgo.Session, guildID string, channelID string) bool {
 	ch, err := s.Channel(channelID)
 	if err != nil {
-		log.Warnln("IsValidChannel(): ", err)
+		slog.Warn("validating channel", "err", err)
 		return false
 	}
 
@@ -163,7 +134,7 @@ func BaseEmbed(s *discordgo.Session) *discordgo.MessageEmbed {
 func CreatePrompt(s *discordgo.Session, m *discordgo.MessageCreate, embed *discordgo.MessageEmbed) string {
 	prompt, err := s.ChannelMessageSendEmbed(m.ChannelID, embed)
 	if err != nil {
-		log.Warnln("CreatePrompt() -> s.ChannelMessageSendEmbed(): ", err)
+		slog.Warn("creating prompt", "err", err)
 		return ""
 	}
 

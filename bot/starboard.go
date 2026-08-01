@@ -1,103 +1,78 @@
-package main
+package bot
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 
-	"github.com/VTGare/Eugen/database"
-	"github.com/VTGare/Eugen/services"
+	"github.com/VTGare/Eugen/store"
 	"github.com/VTGare/Eugen/utils"
 	"github.com/VTGare/embeds"
 	"github.com/bwmarrin/discordgo"
-	"github.com/sirupsen/logrus"
 	"mvdan.cc/xurls/v2"
 )
 
+// StarboardEvent represents a starboard operation to be processed.
 type StarboardEvent struct {
 	React       *discordgo.MessageReactions
-	guild       *database.Guild
-	session     *discordgo.Session
-	message     *discordgo.Message
-	board       *database.Message
-	addEvent    *discordgo.MessageReactionAdd
-	removeEvent *discordgo.MessageReactionRemove
-	deleteEvent *discordgo.MessageDelete
-	selfstar    bool
+	Guild       *store.Guild
+	Session     *discordgo.Session
+	Message     *discordgo.Message
+	Board       *store.Message
+	AddEvent    *discordgo.MessageReactionAdd
+	RemoveEvent *discordgo.MessageReactionRemove
+	DeleteEvent *discordgo.MessageDelete
+	Selfstar    bool
+	Store       *store.Store
+	Bot         *Bot
+	log         *slog.Logger
 }
 
-type StarboardFile struct {
-	Name      string
-	URL       string
-	Thumbnail *os.File
-	Resp      *http.Response
-}
-
-func newStarboardEventAdd(s *discordgo.Session, r *discordgo.MessageReactionAdd, msg *discordgo.Message, emote *discordgo.MessageReactions) (*StarboardEvent, error) {
-	guild := database.GuildCache[r.GuildID]
-	se := &StarboardEvent{guild: guild, message: msg, session: s, addEvent: r, removeEvent: nil, React: emote}
-
-	return se, nil
-}
-
-func newStarboardEventRemove(s *discordgo.Session, r *discordgo.MessageReactionRemove, msg *discordgo.Message) (*StarboardEvent, error) {
-	guild := database.GuildCache[r.GuildID]
-
-	emote := FindReact(msg, guild.StarEmote)
-	se := &StarboardEvent{guild: guild, message: msg, session: s, addEvent: nil, removeEvent: r, React: emote}
-
-	return se, nil
-}
-
-func newStarboardEventDeleted(s *discordgo.Session, d *discordgo.MessageDelete) (*StarboardEvent, error) {
-	guild := database.GuildCache[d.GuildID]
-
-	return &StarboardEvent{guild: guild, message: &discordgo.Message{ID: d.ID, ChannelID: d.ChannelID}, session: s, addEvent: nil, removeEvent: nil, deleteEvent: d}, nil
-}
-
+// Run executes the starboard event logic.
 func (se *StarboardEvent) Run() error {
 	var err error
 
-	se.board, err = database.Repost(se.message.ChannelID, se.message.ID)
+	se.Board, err = se.Store.Messages.Repost(context.Background(), se.Message.ChannelID, se.Message.ID)
 	if err != nil {
 		return err
 	}
 
-	if se.deleteEvent != nil {
-		se.deleteStarboard()
+	if se.DeleteEvent != nil {
+		return se.deleteStarboard()
 	} else if se.isStarboarded() {
 		self, err := se.isSelfStar()
 		if err != nil {
 			return err
 		}
-		se.selfstar = self
+		se.Selfstar = self
 
 		switch {
-		case se.addEvent != nil:
+		case se.AddEvent != nil:
 			se.incrementStarboard()
-		case se.removeEvent != nil:
+		case se.RemoveEvent != nil:
 			se.decrementStarboard()
 		}
-	} else if se.addEvent != nil {
+	} else if se.AddEvent != nil {
 		self, err := se.isSelfStar()
 		if err != nil {
 			return err
 		}
-		se.selfstar = self
+		se.Selfstar = self
 
-		se.createStarboard()
+		return se.createStarboard()
 	}
 
 	return nil
 }
 
 func (se *StarboardEvent) isStarboarded() bool {
-	return se.board != nil
+	return se.Board != nil
 }
 
 func (se *StarboardEvent) isSelfStar() (bool, error) {
@@ -105,13 +80,13 @@ func (se *StarboardEvent) isSelfStar() (bool, error) {
 		return false, nil
 	}
 
-	users, err := se.session.MessageReactions(se.message.ChannelID, se.message.ID, se.React.Emoji.APIName(), 100, "", "")
+	users, err := se.Session.MessageReactions(se.Message.ChannelID, se.Message.ID, se.React.Emoji.APIName(), 100, "", "")
 	if err != nil {
 		return false, fmt.Errorf("MessageReactions(): %v", err)
 	}
 
 	for _, user := range users {
-		if user.ID == se.message.Author.ID {
+		if user.ID == se.Message.Author.ID {
 			return true, nil
 		}
 	}
@@ -122,14 +97,14 @@ func (se *StarboardEvent) isSelfStar() (bool, error) {
 func (se *StarboardEvent) createStarboard() error {
 	var (
 		react    = se.React
-		required = se.guild.StarsRequired(se.addEvent.ChannelID)
+		required = se.Guild.StarsRequired(se.AddEvent.ChannelID)
 	)
 
 	if react == nil {
 		return nil
 	}
 
-	if se.selfstar && !se.guild.Selfstar {
+	if se.Selfstar && !se.Guild.Selfstar {
 		react.Count--
 	}
 
@@ -137,12 +112,12 @@ func (se *StarboardEvent) createStarboard() error {
 		return nil
 	}
 
-	ch, err := se.session.Channel(se.message.ChannelID)
+	ch, err := se.Session.Channel(se.Message.ChannelID)
 	if err != nil {
 		return err
 	}
 
-	embed, err := createEmbed(se.guild, ch, se.message, react)
+	embed, err := createEmbed(se.Guild, ch, se.Message, react)
 	if err != nil {
 		return err
 	}
@@ -151,152 +126,180 @@ func (se *StarboardEvent) createStarboard() error {
 		return nil
 	}
 
-	log := logrus.WithFields(logrus.Fields{
-		"guild":   se.guild.ID,
-		"channel": se.addEvent.ChannelID,
-		"message": se.addEvent.MessageID,
-	})
+	l := se.log.With(
+		"channel_id", se.AddEvent.ChannelID,
+		"message_id", se.AddEvent.MessageID,
+	)
 
-	log.Debug("creating a new starboard")
-
+	l.Debug("creating new starboard")
 	starboardChannel := ""
-	if ch.NSFW && se.guild.NSFWStarboardChannel != "" {
-		starboardChannel = se.guild.NSFWStarboardChannel
+	if ch.NSFW && se.Guild.NSFWStarboardChannel != "" {
+		starboardChannel = se.Guild.NSFWStarboardChannel
 	} else {
-		starboardChannel = se.guild.StarboardChannel
+		starboardChannel = se.Guild.StarboardChannel
 	}
 
-	starboard, err := se.session.ChannelMessageSendComplex(starboardChannel, embed)
+	starboard, err := se.Session.ChannelMessageSendComplex(starboardChannel, embed)
 	if err != nil {
 		return err
 	}
 
-	handleError(se.session, se.addEvent.ChannelID, err)
-	oPair := database.NewPair(se.message.ChannelID, se.message.ID)
-	sPair := database.NewPair(starboard.ChannelID, starboard.ID)
-	err = database.InsertOneMessage(database.NewMessage(&oPair, &sPair, se.addEvent.GuildID))
-	handleError(se.session, se.addEvent.ChannelID, err)
+	var err2 error
+	oPair := store.NewPair(se.Message.ChannelID, se.Message.ID)
+	sPair := store.NewPair(starboard.ChannelID, starboard.ID)
+	err2 = se.Store.Messages.Insert(context.Background(), store.NewMessage(&oPair, &sPair, se.AddEvent.GuildID))
+	se.Bot.HandleError(se.Session, se.AddEvent.ChannelID, err2)
 
 	return nil
 }
 
 func (se *StarboardEvent) incrementStarboard() {
+	l := se.log
+
 	if react := se.React; react != nil {
-		if se.selfstar && !se.guild.Selfstar {
+		if se.Selfstar && !se.Guild.Selfstar {
 			react.Count--
 		}
 
-		msg, err := se.session.ChannelMessage(se.board.Starboard.ChannelID, se.board.Starboard.MessageID)
+		msg, err := se.Session.ChannelMessage(se.Board.Starboard.ChannelID, se.Board.Starboard.MessageID)
 		if err != nil {
 			if strings.Contains(err.Error(), "404 Not Found") {
-				logrus.Infoln("Unknown starboard cached. Removing.")
-				err := database.DeleteMessage(&database.MessagePair{ChannelID: se.message.ChannelID, MessageID: se.message.ID})
+				l.Info("unknown starboard cached, removing")
+				err := se.Store.Messages.Delete(context.Background(), &store.MessagePair{ChannelID: se.Message.ChannelID, MessageID: se.Message.ID})
 				if err != nil {
-					logrus.Warnln("database.DeleteMessage(): ", err)
+					l.Warn("deleting message", "err", err)
 				}
 				return
 			}
-			logrus.Warnln("se.session.ChannelMessage(): ", err)
+			l.Warn("fetching starboard message", "err", err)
 		} else {
 			embed := se.editStarboard(msg, react)
 			if embed != nil {
-				logrus.Infoln(fmt.Sprintf("Editing starboard (adding) %v in channel %v", msg.ID, msg.ChannelID))
-				se.session.ChannelMessageEditEmbed(msg.ChannelID, msg.ID, embed)
+				l.Info("editing starboard", "starboard_id", msg.ID, "channel_id", msg.ChannelID, "op", "add")
+				se.Session.ChannelMessageEditEmbed(msg.ChannelID, msg.ID, embed)
 			}
 		}
 	}
 }
 
 func (se *StarboardEvent) decrementStarboard() {
-	starboard, err := se.session.ChannelMessage(se.board.Starboard.ChannelID, se.board.Starboard.MessageID)
+	l := se.log
+
+	starboard, err := se.Session.ChannelMessage(se.Board.Starboard.ChannelID, se.Board.Starboard.MessageID)
 	if err != nil {
 		if strings.Contains(err.Error(), "404 Not Found") {
-			logrus.Infoln("Unknown starboard cached. Removing.")
-			err := database.DeleteMessage(&database.MessagePair{ChannelID: se.message.ChannelID, MessageID: se.message.ID})
+			l.Info("unknown starboard cached, removing")
+			err := se.Store.Messages.Delete(context.Background(), &store.MessagePair{ChannelID: se.Message.ChannelID, MessageID: se.Message.ID})
 			if err != nil {
-				logrus.Warnln("database.DeleteMessage(): ", err)
+				l.Warn("deleting message", "err", err)
 			}
 			return
 		}
-		logrus.Warnln("se.session.ChannelMessage(): ", err)
+		l.Warn("fetching starboard message", "err", err)
 	}
 
 	if starboard == nil {
-		logrus.Warnln("decrementStarboard(): nil starboard")
+		l.Warn("starboard is nil")
 		return
 	}
 
-	required := se.guild.StarsRequired(se.removeEvent.ChannelID)
+	required := se.Guild.StarsRequired(se.RemoveEvent.ChannelID)
 	if react := se.React; react != nil {
-		if se.selfstar && !se.guild.Selfstar {
+		if se.Selfstar && !se.Guild.Selfstar {
 			react.Count--
 		}
 
 		if react.Count <= required/2 {
-			err := se.session.ChannelMessageDelete(starboard.ChannelID, starboard.ID)
+			err := se.Session.ChannelMessageDelete(starboard.ChannelID, starboard.ID)
 			if err != nil {
-				logrus.Warnln("se.session.ChannelMessageDelete():", err)
+				l.Warn("deleting starboard message", "err", err)
 			}
 		} else {
 			embed := se.editStarboard(starboard, react)
 			if embed != nil {
-				logrus.Infof("Editing starboard (subtracting) %v in channel %v", se.board.Starboard.MessageID, se.board.Starboard.ChannelID)
-				_, err := se.session.ChannelMessageEditEmbed(starboard.ChannelID, starboard.ID, embed)
+				l.Info("editing starboard", "starboard_id", se.Board.Starboard.MessageID, "channel_id", se.Board.Starboard.ChannelID, "op", "subtract")
+				_, err := se.Session.ChannelMessageEditEmbed(starboard.ChannelID, starboard.ID, embed)
 				if err != nil {
-					logrus.Warnln("se.session.ChannelMessageEditEmbed():", err)
+					l.Warn("editing starboard message", "err", err)
 				}
 			}
 		}
 	} else {
-		err := se.session.ChannelMessageDelete(starboard.ChannelID, starboard.ID)
+		err := se.Session.ChannelMessageDelete(starboard.ChannelID, starboard.ID)
 		if err != nil {
-			logrus.Warnln("se.session.ChannelMessageDelete(): ", err)
+			l.Warn("deleting starboard message", "err", err)
 		}
 	}
 }
 
 func (se *StarboardEvent) deleteStarboard() error {
+	l := se.log
 	original := true
 
-	if se.board == nil {
+	if se.Board == nil {
 		original = false
-		board, err := database.RepostByStarboard(se.deleteEvent.ChannelID, se.message.ID)
+		board, err := se.Store.Messages.RepostByStarboard(context.Background(), se.DeleteEvent.ChannelID, se.Message.ID)
 		if err != nil {
 			return err
 		}
 		if board != nil {
-			se.board = board
+			se.Board = board
 		} else {
 			return nil
 		}
 	}
 
-	if ch, ok := starboardQueue[*se.board.Original]; ok {
+	if ch, ok := se.Bot.Queue[*se.Board.Original]; ok {
 		close(ch)
-		delete(starboardQueue, *se.board.Original)
+		delete(se.Bot.Queue, *se.Board.Original)
 	}
 
-	err := database.DeleteMessage(se.board.Original)
+	err := se.Store.Messages.Delete(context.Background(), se.Board.Original)
 	if err != nil {
-		logrus.Warnln("database.DeleteMessage():", err)
+		l.Warn("deleting message", "err", err)
 	}
 
-	logrus.Infof("Deleting starboard. ID: %v. Original: %v", se.deleteEvent.ID, original)
+	l.Info("deleting starboard", "message_id", se.DeleteEvent.ID, "original", original)
 	if original {
-		starboard, err := se.session.ChannelMessage(se.board.Starboard.ChannelID, se.board.Starboard.MessageID)
+		starboard, err := se.Session.ChannelMessage(se.Board.Starboard.ChannelID, se.Board.Starboard.MessageID)
 		if err != nil {
 			return err
 		}
-		err = se.session.ChannelMessageDelete(starboard.ChannelID, starboard.ID)
+		err = se.Session.ChannelMessageDelete(starboard.ChannelID, starboard.ID)
 		if err != nil {
-			logrus.Warnln("se.session.ChannelMessageDelete():", err)
+			l.Warn("deleting starboard message", "err", err)
 		}
 	}
 	return nil
 }
 
+func (se *StarboardEvent) editStarboard(msg *discordgo.Message, react *discordgo.MessageReactions) *discordgo.MessageEmbed {
+	embed := msg.Embeds[0]
+
+	current, _ := strconv.Atoi(strings.Trim(embed.Footer.Text, "⭐ "))
+	if current == react.Count {
+		return nil
+	}
+
+	if se.Guild.IsGuildEmoji() {
+		embed.Footer.Text = strconv.Itoa(react.Count)
+	} else {
+		embed.Footer.Text = fmt.Sprintf("⭐ %v", react.Count)
+	}
+
+	if se.Selfstar && se.Guild.Selfstar {
+		embed.Footer.Text += " | self-starred"
+	}
+
+	return embed
+}
+
+// --- Media / embed processing ---
+
+type modifyContentFunc func(content string) string
+
 func createEmbed(
-	guild *database.Guild, ch *discordgo.Channel, message *discordgo.Message,
+	guild *store.Guild, ch *discordgo.Channel, message *discordgo.Message,
 	react *discordgo.MessageReactions,
 ) (*discordgo.MessageSend, error) {
 	var (
@@ -333,8 +336,8 @@ func createEmbed(
 
 		content = fmsg.Content
 		file, modifyContent, err = messageContent(eb, fmsg)
-
-		eb.AddField("Forwarded message", fmt.Sprintf("[Click here](https://discord.com/channels/%v/%v/%v)",
+		eb.AddField("Forwarded message", fmt.Sprintf(
+			"[Click here](https://discord.com/channels/%v/%v/%v)",
 			message.MessageReference.GuildID,
 			message.MessageReference.ChannelID,
 			message.MessageReference.MessageID,
@@ -361,12 +364,13 @@ func createEmbed(
 		if message.ReferencedMessage.Content != "" {
 			content += "\n> \n> " + message.ReferencedMessage.Content
 		} else {
-			url := fmt.Sprintf("https://discord.com/channels/%v/%v/%v",
+			u := fmt.Sprintf(
+				"https://discord.com/channels/%v/%v/%v",
 				message.ReferencedMessage.GuildID,
 				message.ReferencedMessage.ChannelID,
 				message.ReferencedMessage.ID,
 			)
-			eb.AddField("Reply to", url)
+			eb.AddField("Reply to", u)
 		}
 	}
 
@@ -377,21 +381,18 @@ func createEmbed(
 	return msg, nil
 }
 
-type modifyContentFunc func(content string) string
-
 func messageContent(eb *embeds.Builder, message *discordgo.Message) (*discordgo.File, modifyContentFunc, error) {
 	// Apply sticker first. Anything else will override it.
 	if len(message.StickerItems) != 0 {
 		sticker := message.StickerItems[0]
-		url := fmt.Sprintf("https://cdn.discordapp.com/stickers/%v.png", sticker.ID)
-		eb.Image(url)
+		u := fmt.Sprintf("https://cdn.discordapp.com/stickers/%v.png", sticker.ID)
+		eb.Image(u)
 	}
 
 	// Prioritize attachments over anything else.
 	if len(message.Attachments) != 0 {
 		return fromAttachments(eb, message)
 	}
-
 	urls := findURLs(message.Content)
 	if len(urls) != 0 {
 		return fromURL(eb, message, urls[0])
@@ -419,7 +420,6 @@ func fromAttachments(eb *embeds.Builder, message *discordgo.Message) (*discordgo
 		if err != nil {
 			return nil, nil, err
 		}
-
 		if file == nil {
 			eb.AddField("Attachment", fmt.Sprintf("[Click here](%v)", first.URL), true)
 		}
@@ -432,56 +432,34 @@ func fromAttachments(eb *embeds.Builder, message *discordgo.Message) (*discordgo
 	return file, nil, nil
 }
 
-func fromURL(eb *embeds.Builder, message *discordgo.Message, url *EugenURL) (*discordgo.File, modifyContentFunc, error) {
+func fromURL(eb *embeds.Builder, message *discordgo.Message, eugURL *EugenURL) (*discordgo.File, modifyContentFunc, error) {
+	uri := eugURL.URL.String()
+
 	removeURL := func(content string) string {
-		return strings.Replace(content, url.URL.String(), "", 1)
+		return strings.Replace(content, uri, "", 1)
 	}
 
-	if url.Type == URLTypeImage {
-		eb.Image(url.URL.String())
+	switch eugURL.Type {
+	case URLTypeImage:
+		eb.Image(uri)
 		return nil, removeURL, nil
-	}
-
-	if url.Type == URLTypeVideo {
-		uri := url.URL.String()
+	case URLTypeVideo:
 		if strings.HasSuffix(uri, "gifv") {
 			uri = strings.Replace(uri, "gifv", "mp4", 1)
 		}
-
 		file, err := downloadFile(uri)
 		if err != nil {
 			return nil, nil, err
 		}
-
 		if file == nil {
 			eb.AddField("Attachment", fmt.Sprintf("[Click here](%v)", uri), true)
 		}
-
 		return file, removeURL, nil
-	}
-
-	if url.Type == URLTypeTenor {
-		uri := url.URL.String()
-		res, err := services.Tenor(uri)
-		if err != nil {
-			return nil, nil, fmt.Errorf("tenor error: %w", err)
-		}
-
-		// Do nothing.
-		if len(res.Media) == 0 {
-			return nil, nil, nil
-		}
-
-		eb.Image(res.Media[0].MediumGIF.URL)
-		return nil, removeURL, nil
-	}
-
-	if url.Type == URLTypeImgur {
-		eb.Image(fmt.Sprintf("https://i.imgur.com/%v.png", url.URL.Path))
+	case URLTypeImgur:
+		eb.Image(fmt.Sprintf("https://i.imgur.com/%v.png", uri))
 		if len(message.Embeds) == 0 {
 			return nil, removeURL, nil
 		}
-
 		embed := message.Embeds[0]
 		if embed.Thumbnail != nil {
 			eb.Image(embed.Thumbnail.ProxyURL)
@@ -551,8 +529,6 @@ func findURLs(content string) []*EugenURL {
 			eu.Type = URLTypeVideo
 		case strings.Contains(parsed.Host, "imgur"):
 			eu.Type = URLTypeImgur
-		case strings.Contains(parsed.String(), "tenor.com/view"):
-			eu.Type = URLTypeTenor
 		default:
 			continue
 		}
@@ -561,36 +537,6 @@ func findURLs(content string) []*EugenURL {
 	}
 
 	return urls
-}
-
-func FindReact(message *discordgo.Message, emote string) *discordgo.MessageReactions {
-	for _, react := range message.Reactions {
-		if strings.ToLower(react.Emoji.APIName()) == strings.Trim(emote, "<:>") {
-			return react
-		}
-	}
-	return nil
-}
-
-func (se *StarboardEvent) editStarboard(msg *discordgo.Message, react *discordgo.MessageReactions) *discordgo.MessageEmbed {
-	embed := msg.Embeds[0]
-
-	current, _ := strconv.Atoi(strings.Trim(embed.Footer.Text, "⭐ "))
-	if current == react.Count {
-		return nil
-	}
-
-	if se.guild.IsGuildEmoji() {
-		embed.Footer.Text = strconv.Itoa(react.Count)
-	} else {
-		embed.Footer.Text = fmt.Sprintf("⭐ %v", react.Count)
-	}
-
-	if se.selfstar && se.guild.Selfstar {
-		embed.Footer.Text += " | self-starred"
-	}
-
-	return embed
 }
 
 func downloadFile(uri string) (*discordgo.File, error) {
@@ -625,7 +571,7 @@ func checkFilesizeLimit(uri string) (bool, error) {
 	return head.ContentLength < limit, nil
 }
 
-// download file downloads a file from URL and returns its contents and filename.
+// getFile downloads a file from URL and returns its contents and filename.
 func getFile(uri string) (*bytes.Buffer, string, error) {
 	var filename string
 
@@ -657,14 +603,13 @@ func getFile(uri string) (*bytes.Buffer, string, error) {
 }
 
 func emojiURL(emoji *discordgo.Emoji) string {
-	url := fmt.Sprintf("https://cdn.discordapp.com/emojis/%v.", emoji.ID)
+	u := fmt.Sprintf("https://cdn.discordapp.com/emojis/%v.", emoji.ID)
 	if emoji.Animated {
-		url += "gif"
+		u += "gif"
 	} else {
-		url += "png"
+		u += "png"
 	}
-
-	return url
+	return u
 }
 
 func hasSuffixes(str string, suffixes ...string) bool {
@@ -673,6 +618,5 @@ func hasSuffixes(str string, suffixes ...string) bool {
 			return true
 		}
 	}
-
 	return false
 }

@@ -1,20 +1,17 @@
-package main
+package bot
 
 import "net/url"
 
+// URLType represents the type of a parsed URL.
 type URLType int
 
 const (
 	URLTypeImage URLType = iota
 	URLTypeVideo
-	URLTypeTenor
 	URLTypeImgur
 )
 
-func (t URLType) String() string {
-	return [...]string{"Image", "Video", "Tenor", "Imgur"}[t]
-}
-
+// EugenURL wraps a parsed URL with its type classification.
 type EugenURL struct {
 	URL  *url.URL
 	Type URLType
