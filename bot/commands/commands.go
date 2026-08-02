@@ -149,8 +149,8 @@ func Register(b *bot.Bot) {
 			IsVisible: true,
 			ExtendedHelp: []*discordgo.MessageEmbedField{
 				{Name: "Usage", Value: "``{prefix}setup``", Inline: false},
-				{Name: "Description", Value: "Starts a step-by-step interactive wizard that walks you through configuring the starboard for your server. The steps are: starboard channel, minimum stars, star emote, self-star, and embed colour.\n\nAt any step, type `cancel` or `exit` to abort, or `previous` to go back to the prior step.", Inline: false},
-				{Name: "Setup steps", Value: "1. **Starboard channel** — mention a channel where starred messages will be posted.\n2. **Minimum stars** — the default number of stars needed to post to the starboard.\n3. **Star emote** — the reaction emote to use (type `default` for ⭐).\n4. **Self-star** — whether the message author's own reaction counts.\n5. **Embed colour** — a hex colour or integer (0–16777215) for starboard embeds (type `default` for the preset colour).", Inline: false},
+				{Name: "Description", Value: "Starts a step-by-step interactive wizard that walks you through configuring the starboard for your server. The steps are: starboard channel, minimum stars, star emote, self-star, and embed color.\n\nAt any step, type `cancel` or `exit` to abort, or `previous` to go back to the prior step.", Inline: false},
+				{Name: "Setup steps", Value: "1. **Starboard channel** — mention a channel where starred messages will be posted.\n2. **Minimum stars** — the default number of stars needed to post to the starboard.\n3. **Star emote** — the reaction emote to use (type `default` for ⭐).\n4. **Self-star** — whether the message author's own reaction counts.\n5. **Embed color** — a hex color or integer (0–16777215) for starboard embeds (type `default` for the preset color).", Inline: false},
 			},
 		},
 		Exec: setup(b),

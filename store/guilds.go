@@ -117,15 +117,15 @@ func (g *Guild) ChannelSettingsToString() string {
 	if len(g.ChannelSettings) == 0 {
 		return "none"
 	}
-	sb.WriteString(fmt.Sprintf("<#%v>``%v``: %v ", g.ChannelSettings[0].ID, g.ChannelSettings[0].ID, g.ChannelSettings[0].StarRequirement))
+	fmt.Fprintf(&sb, "<#%v>``%v``: %v ", g.ChannelSettings[0].ID, g.ChannelSettings[0].ID, g.ChannelSettings[0].StarRequirement)
 	inRow := 1
 	if len(g.ChannelSettings) > 1 {
 		for _, ch := range g.ChannelSettings[1:] {
 			if inRow == 2 {
-				sb.WriteString(fmt.Sprintf("\n<#%v>``%v``: %v ", ch.ID, ch.ID, ch.StarRequirement))
+				fmt.Fprintf(&sb, "\n<#%v>``%v``: %v ", ch.ID, ch.ID, ch.StarRequirement)
 				inRow = 0
 			} else {
-				sb.WriteString(fmt.Sprintf("| <#%v>``%v``: %v ", ch.ID, ch.ID, ch.StarRequirement))
+				fmt.Fprintf(&sb, "| <#%v>``%v``: %v ", ch.ID, ch.ID, ch.StarRequirement)
 			}
 			inRow++
 		}
@@ -279,20 +279,60 @@ func (g *Guilds) Delete(ctx context.Context, guildID string) error {
 	return nil
 }
 
-// SetField sets a single field on a guild document and returns the updated doc.
-func (g *Guilds) SetField(ctx context.Context, guildID, field string, value any) (*Guild, error) {
-	res := g.col.FindOneAndUpdate(
-		ctx,
-		bson.M{"guild_id": guildID},
-		bson.M{"$set": bson.M{field: value, "updated_at": time.Now()}},
-		options.FindOneAndUpdate().SetReturnDocument(options.After),
-	)
-	guild := &Guild{}
-	if err := res.Decode(guild); err != nil {
-		return nil, fmt.Errorf("store: setting %s on guild %s: %w", field, guildID, err)
+// SetEnabled toggles whether the starboard engine is active for a guild.
+func (g *Guilds) SetEnabled(ctx context.Context, guildID string, enabled bool) error {
+	return g.cacheAndReturn(ctx, guildID, bson.M{"$set": bson.M{"enabled": enabled}})
+}
+
+// SetPrefix updates the command prefix for a guild. The prefix must be 1-5
+// runes long; shorter/longer values return an error.
+func (g *Guilds) SetPrefix(ctx context.Context, guildID, prefix string) error {
+	if len(prefix) > 5 {
+		return errors.New("prefix is too long, max 5 characters")
 	}
-	g.cache.CacheSet(guild)
-	return guild, nil
+
+	return g.cacheAndReturn(ctx, guildID, bson.M{"$set": bson.M{"prefix": prefix}})
+}
+
+// SetStarboardChannel sets the channel a guild posts starboard content to.
+// The channelID must be non-empty.
+func (g *Guilds) SetStarboardChannel(ctx context.Context, guildID, channelID string) error {
+	return g.cacheAndReturn(ctx, guildID, bson.M{"$set": bson.M{"starboard": channelID}})
+}
+
+// SetStarEmote sets the emoji used as the star reaction count.
+func (g *Guilds) SetStarEmote(ctx context.Context, guildID, emote string) error {
+	return g.cacheAndReturn(ctx, guildID, bson.M{"$set": bson.M{"emote": emote}})
+}
+
+// SetEmbedColor sets the embed color for a guild. The color must be in the
+// range [0, 0xFFFFFF] (Discord's 24-bit color range).
+func (g *Guilds) SetEmbedColor(ctx context.Context, guildID string, color int64) error {
+	if color < 0 || color > 16777215 {
+		return errors.New("color must be in range 0 to 16777215")
+	}
+
+	return g.cacheAndReturn(ctx, guildID, bson.M{"$set": bson.M{"color": color}})
+}
+
+// SetSelfstar toggles whether the guild counts stars from the message author.
+func (g *Guilds) SetSelfstar(ctx context.Context, guildID string, selfstar bool) error {
+	return g.cacheAndReturn(ctx, guildID, bson.M{"$set": bson.M{"selfstar": selfstar}})
+}
+
+// SetIgnoreBots toggles whether star reactions from bots are counted.
+func (g *Guilds) SetIgnoreBots(ctx context.Context, guildID string, ignore bool) error {
+	return g.cacheAndReturn(ctx, guildID, bson.M{"$set": bson.M{"ignorebots": ignore}})
+}
+
+// SetMinimumStars sets the global star threshold for a guild. The value must
+// be at least 1.
+func (g *Guilds) SetMinimumStars(ctx context.Context, guildID string, stars int) error {
+	if stars < 1 {
+		return errors.New("minimum stars must be >= 1")
+	}
+
+	return g.cacheAndReturn(ctx, guildID, bson.M{"$set": bson.M{"stars": stars}})
 }
 
 func (g *Guilds) BanChannel(ctx context.Context, guildID, channelID string) error {

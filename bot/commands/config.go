@@ -248,84 +248,120 @@ func req(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string
 	}
 }
 
+// guildSetter parses a raw value string and applies it to a guild via the
+// typed store methods. It returns a human-readable representation of the
+// applied value for the confirmation message.
+type guildSetter func(ctx context.Context, gs *store.Guilds, s *discordgo.Session, m *discordgo.MessageCreate, raw string) (string, error)
+
+var guildSetters = map[string]guildSetter{
+	"enabled": func(ctx context.Context, gs *store.Guilds, _ *discordgo.Session, m *discordgo.MessageCreate, raw string) (string, error) {
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			return "", fmt.Errorf("unable to parse %q to a boolean", raw)
+		}
+
+		return strconv.FormatBool(v), gs.SetEnabled(ctx, m.GuildID, v)
+	},
+	"selfstar": func(ctx context.Context, gs *store.Guilds, _ *discordgo.Session, m *discordgo.MessageCreate, raw string) (string, error) {
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			return "", fmt.Errorf("unable to parse %q to a boolean", raw)
+		}
+
+		return strconv.FormatBool(v), gs.SetSelfstar(ctx, m.GuildID, v)
+	},
+	"ignorebots": func(ctx context.Context, gs *store.Guilds, _ *discordgo.Session, m *discordgo.MessageCreate, raw string) (string, error) {
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			return "", fmt.Errorf("unable to parse %q to a boolean", raw)
+		}
+
+		return strconv.FormatBool(v), gs.SetIgnoreBots(ctx, m.GuildID, v)
+	},
+	"color": func(ctx context.Context, gs *store.Guilds, _ *discordgo.Session, m *discordgo.MessageCreate, raw string) (string, error) {
+		v, ok := parseColor(raw)
+		if !ok {
+			return "", fmt.Errorf("unable to parse %q to a valid color", raw)
+		}
+
+		return strconv.FormatInt(v, 10), gs.SetEmbedColor(ctx, m.GuildID, v)
+	},
+	"prefix": func(ctx context.Context, gs *store.Guilds, _ *discordgo.Session, m *discordgo.MessageCreate, raw string) (string, error) {
+		v := raw
+		if unicode.IsLetter(rune(raw[len(raw)-1])) {
+			v += " "
+		}
+
+		return v, gs.SetPrefix(ctx, m.GuildID, v)
+	},
+	"emote": func(ctx context.Context, gs *store.Guilds, s *discordgo.Session, m *discordgo.MessageCreate, raw string) (string, error) {
+		v, err := utils.GetEmoji(s, m.GuildID, raw)
+		if err != nil {
+			return "", errors.New("argument's either a global emoji or not one at all")
+		}
+
+		return v, gs.SetStarEmote(ctx, m.GuildID, v)
+	},
+	"starboard": func(ctx context.Context, gs *store.Guilds, s *discordgo.Session, m *discordgo.MessageCreate, raw string) (string, error) {
+		v := raw
+
+		if chID, ok := strings.CutPrefix(v, "<#"); ok {
+			v = strings.TrimSuffix(chID, ">")
+		}
+
+		ch, err := s.Channel(v)
+		if err != nil {
+			return "", err
+		}
+
+		if ch.GuildID != m.GuildID {
+			return "", errors.New("can't assign starboard to a channel from a foreign server")
+		}
+
+		return "<#" + v + ">", gs.SetStarboardChannel(ctx, m.GuildID, v)
+	},
+	"stars": func(ctx context.Context, gs *store.Guilds, _ *discordgo.Session, m *discordgo.MessageCreate, raw string) (string, error) {
+		stars, err := strconv.Atoi(raw)
+		if err != nil {
+			return "", fmt.Errorf("unable to parse %q to an integer", raw)
+		}
+
+		return raw, gs.SetMinimumStars(ctx, m.GuildID, stars)
+	},
+}
+
 func set(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string) error {
 	return func(s *discordgo.Session, m *discordgo.MessageCreate, args []string) error {
 		switch len(args) {
 		case 0:
 			showGuildSettings(s, m, b)
 		case 2:
-			isAdmin, err := utils.MemberHasPermission(s, m.GuildID, m.Author.ID, discordgo.PermissionAdministrator)
+			ok, err := utils.MemberHasPermission(s, m.GuildID, m.Author.ID, discordgo.PermissionAdministrator)
 			if err != nil {
 				return err
 			}
 
-			if !isAdmin {
+			if !ok {
 				return utils.ErrNoPermission
 			}
 
-			setting := args[0]
-			newSetting := strings.ToLower(args[1])
-
-			var passedSetting any
-			switch setting {
-			case "enabled":
-				passedSetting, err = strconv.ParseBool(newSetting)
-			case "selfstar":
-				passedSetting, err = strconv.ParseBool(newSetting)
-			case "ignorebots":
-				passedSetting, err = strconv.ParseBool(newSetting)
-			case "color":
-				if passedSetting, err = strconv.ParseInt(newSetting, 0, 32); err != nil {
-					if passedSetting, err = strconv.ParseInt("0x"+newSetting, 0, 32); err != nil {
-						return fmt.Errorf("unable to parse %v to a number", newSetting)
-					}
-				}
-				if passedSetting.(int64) > 16777215 || passedSetting.(int64) < 0 {
-					return errors.New("non-existing decimal color, it should be in range from 0 to 16777215")
-				}
-			case "prefix":
-				if unicode.IsLetter(rune(newSetting[len(newSetting)-1])) {
-					passedSetting = newSetting + " "
-				} else {
-					passedSetting = newSetting
-				}
-				if len(passedSetting.(string)) > 5 {
-					return errors.New("new prefix is too long")
-				}
-			case "stars":
-				passedSetting, err = strconv.Atoi(newSetting)
-			case "emote":
-				emoji, err := utils.GetEmoji(s, m.GuildID, newSetting)
-				if err != nil {
-					return errors.New("argument's either global emoji or not one at all")
-				}
-				passedSetting = emoji
-			case "starboard":
-				if chID, ok := strings.CutPrefix(newSetting, "<#"); ok {
-					newSetting = strings.TrimSuffix(chID, ">")
-				}
-				ch, err := s.Channel(newSetting)
-				if err != nil {
-					return err
-				}
-				if ch.GuildID != m.GuildID {
-					return errors.New("can't assign starboard to a channel from a foreign server")
-				}
-				passedSetting = newSetting
-			default:
-				return errors.New("unknown setting " + setting)
+			setter, ok := guildSetters[args[0]]
+			if !ok {
+				return errors.New("unknown setting " + args[0])
 			}
 
+			raw := strings.ToLower(args[1])
+
+			applied, err := setter(context.Background(), b.Store.Guilds, s, m, raw)
 			if err != nil {
 				return err
 			}
 
-			_, err = b.Store.Guilds.SetField(context.Background(), m.GuildID, setting, passedSetting)
-			if err != nil {
-				return err
-			}
+			eb := embeds.NewBuilder().SuccessTemplate("Successfully changed setting")
+			eb.AddField("Setting", args[0]).
+				AddField("New value", applied)
 
-			s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Successfully changed ``%v`` to ``%v``", setting, newSetting))
+			s.ChannelMessageSendEmbed(m.ChannelID, eb.Finalize())
 		default:
 			return errors.New("incorrect command usage. Please use e!help set command for more information")
 		}
@@ -385,13 +421,13 @@ func verifyStarboardChannel(s *discordgo.Session, guildID, chID string) (string,
 	return chID, true
 }
 
-// parseColor validates and parses a colour value from user input, accepting
+// parseColor validates and parses a color value from user input, accepting
 // both decimal and hexadecimal (with or without 0x prefix) representations.
-// The value must be in the range [0, 16777215] to be a valid Discord colour.
-func parseColor(colour string) (int64, bool) {
-	c, err := strconv.ParseInt(colour, 0, 32)
+// The value must be in the range [0, 16777215] to be a valid Discord color.
+func parseColor(color string) (int64, bool) {
+	c, err := strconv.ParseInt(color, 0, 32)
 	if err != nil {
-		c, err = strconv.ParseInt("0x"+colour, 0, 32)
+		c, err = strconv.ParseInt("0x"+color, 0, 32)
 		if err != nil {
 			return 0, false
 		}
