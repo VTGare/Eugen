@@ -39,6 +39,7 @@ func New(st *store.Store, config Config, logger *slog.Logger) *Bot {
 	if config.Prefixes == nil {
 		config.Prefixes = []string{"e!", "e.", "e "}
 	}
+
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -49,11 +50,10 @@ func New(st *store.Store, config Config, logger *slog.Logger) *Bot {
 		Registry: registry.New(),
 		log:      logger,
 	}
+
 	return b
 }
 
-// SetStarboarder injects the starboard engine. Called after session creation
-// so the Starboarder can access the discordgo.Session.
 func (b *Bot) SetStarboarder(sb *starboard.Starboarder) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -74,7 +74,6 @@ func (b *Bot) Mention() string {
 	return b.botMention
 }
 
-// Logger returns the bot's logger.
 func (b *Bot) Logger() *slog.Logger {
 	return b.log
 }
@@ -156,11 +155,11 @@ func (b *Bot) HandleError(s *discordgo.Session, channelID string, err error) {
 	}
 }
 
-// RegisterHandler is a convenience for registering a discordgo handler.
 func (b *Bot) RegisterHandler(handler any) {
 	if b.Session == nil {
 		return
 	}
+
 	b.Session.AddHandler(handler)
 }
 
@@ -179,6 +178,7 @@ func (b *Bot) Start(token string) error {
 		discordgo.IntentsDirectMessages
 
 	b.Session = s
+
 	return nil
 }
 
@@ -203,9 +203,11 @@ func (b *Bot) CreateIndexes(ctx context.Context) error {
 	if err := b.Store.Guilds.CreateIndex(ctx); err != nil {
 		return fmt.Errorf("bot: creating guilds index: %w", err)
 	}
+
 	if err := b.Store.Messages.CreateIndex(ctx); err != nil {
 		return fmt.Errorf("bot: creating messages index: %w", err)
 	}
+
 	return nil
 }
 

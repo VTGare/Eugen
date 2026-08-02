@@ -28,11 +28,11 @@ func (p MessagePair) String() string {
 }
 
 type Message struct {
-	ID      bson.ObjectID `bson:"_id,omitempty" json:"-"`
-	GuildID string        `bson:"guild_id" json:"guild_id"`
-	Original  *MessagePair `bson:"original" json:"original"`
-	Starboard *MessagePair `bson:"starboard" json:"starboard"`
-	CreatedAt time.Time    `bson:"created_at" json:"created_at"`
+	ID        bson.ObjectID `bson:"_id,omitempty" json:"-"`
+	GuildID   string        `bson:"guild_id" json:"guild_id"`
+	Original  *MessagePair  `bson:"original" json:"original"`
+	Starboard *MessagePair  `bson:"starboard" json:"starboard"`
+	CreatedAt time.Time     `bson:"created_at" json:"created_at"`
 }
 
 func NewMessage(original, starboard *MessagePair, guildID string) *Message {
@@ -57,8 +57,6 @@ func NewMessages(db *mongo.Database) *Messages {
 	m.cache.start()
 	return m
 }
-
-// --- Cache ---
 
 type messageEntry struct {
 	msg    Message
@@ -88,15 +86,18 @@ func (c *messageCache) get(pair MessagePair) (Message, bool) {
 	c.mu.RLock()
 	e, ok := c.data[pair]
 	c.mu.RUnlock()
+
 	if !ok {
 		return Message{}, false
 	}
+
 	if time.Now().After(e.expiry) {
 		c.mu.Lock()
 		delete(c.data, pair)
 		c.mu.Unlock()
 		return Message{}, false
 	}
+
 	return e.msg, true
 }
 
@@ -122,8 +123,6 @@ func (c *messageCache) evictExpired() {
 	}
 	c.mu.Unlock()
 }
-
-// --- CRUD operations ---
 
 // Insert persists a single message record.
 func (m *Messages) Insert(ctx context.Context, msg *Message) error {
@@ -206,11 +205,6 @@ func (m *Messages) RepostByStarboard(ctx context.Context, channelID, id string) 
 	return msg, nil
 }
 
-// Starboard is an alias for RepostByStarboard, retained for the original API.
-func (m *Messages) Starboard(ctx context.Context, channelID, id string) (*Message, error) {
-	return m.RepostByStarboard(ctx, channelID, id)
-}
-
 func (m *Messages) CreateIndex(ctx context.Context) error {
 	_, err := m.col.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
@@ -222,5 +216,6 @@ func (m *Messages) CreateIndex(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("store: creating messages unique index: %w", err)
 	}
+
 	return nil
 }

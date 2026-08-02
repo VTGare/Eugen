@@ -22,9 +22,11 @@ func ban(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string
 		if err != nil {
 			return err
 		}
+
 		if !ok {
 			return fmt.Errorf("You don't have enough permissions to run this command.")
 		}
+
 		if len(args) == 0 {
 			return utils.ErrNotEnoughArguments
 		}
@@ -51,6 +53,7 @@ func ban(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string
 					if err != nil {
 						return err
 					}
+
 					banned = append(banned, fmt.Sprintf("<#%v>", ch.ID))
 				}
 			}
@@ -70,9 +73,11 @@ func unban(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []stri
 		if err != nil {
 			return err
 		}
+
 		if !ok {
 			return fmt.Errorf("You don't have enough permissions to run this command.")
 		}
+
 		if len(args) == 0 {
 			return utils.ErrNotEnoughArguments
 		}
@@ -87,6 +92,7 @@ func unban(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []stri
 				if err != nil {
 					return err
 				}
+
 				unbanned = append(unbanned, fmt.Sprintf("<#%v>", arg))
 			}
 		}
@@ -110,9 +116,11 @@ func blacklist(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []
 		if err != nil {
 			return err
 		}
+
 		if !ok {
 			return fmt.Errorf("You don't have enough permissions to run this command.")
 		}
+
 		if len(args) == 0 {
 			return utils.ErrNotEnoughArguments
 		}
@@ -149,9 +157,11 @@ func unblacklist(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, 
 		if err != nil {
 			return err
 		}
+
 		if !ok {
 			return fmt.Errorf("You don't have enough permissions to run this command.")
 		}
+
 		if len(args) == 0 {
 			return utils.ErrNotEnoughArguments
 		}
@@ -166,6 +176,7 @@ func unblacklist(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, 
 				if err != nil {
 					return err
 				}
+
 				unblacklisted = append(unblacklisted, fmt.Sprintf("<@%v>", arg))
 			}
 		}
@@ -184,9 +195,11 @@ func req(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string
 		if err != nil {
 			return err
 		}
+
 		if !ok {
 			return fmt.Errorf("You don't have enough permissions to run this command.")
 		}
+
 		if len(args) < 2 {
 			return utils.ErrNotEnoughArguments
 		}
@@ -244,6 +257,7 @@ func set(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string
 			if err != nil {
 				return err
 			}
+
 			if !isAdmin {
 				return utils.ErrNoPermission
 			}
@@ -309,6 +323,7 @@ func set(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string
 			if err != nil {
 				return err
 			}
+
 			s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Successfully changed ``%v`` to ``%v``", setting, newSetting))
 		default:
 			return errors.New("incorrect command usage. Please use e!help set command for more information")

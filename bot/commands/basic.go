@@ -12,7 +12,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-func ping(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string) error {
+func ping(*bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string) error {
 	return func(s *discordgo.Session, m *discordgo.MessageCreate, args []string) error {
 		embed := utils.BaseEmbed(s)
 		embed.Title = "🏓 Pong!"
@@ -126,7 +126,7 @@ func sendCommandHelp(s *discordgo.Session, m *discordgo.MessageCreate, b *bot.Bo
 	return err
 }
 
-func invite(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string) error {
+func invite(*bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string) error {
 	return func(s *discordgo.Session, m *discordgo.MessageCreate, args []string) error {
 		embed := &discordgo.MessageEmbed{
 			Title:       "Thanks for spreading the word!",

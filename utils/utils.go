@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/url"
 	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -36,32 +37,21 @@ var (
 	}
 )
 
-// IsImageURL reports whether the given URL points to an image file based
-// on its path extension. Query strings and fragments are ignored.
 func IsImageURL(uri string) bool {
 	return hasExtension(uri, imageExtensions)
 }
 
-// IsVideoURL reports whether the given URL points to a video file based
-// on its path extension. Query strings and fragments are ignored.
 func IsVideoURL(uri string) bool {
 	return hasExtension(uri, videoExtensions)
 }
 
-// hasExtension parses the URL and checks if the path has one of the given
-// extensions (case-insensitive). Returns false if the URL is malformed.
 func hasExtension(uri string, exts []string) bool {
 	parsed, err := url.Parse(uri)
 	if err != nil {
 		return false
 	}
 	ext := strings.ToLower(path.Ext(parsed.Path))
-	for _, e := range exts {
-		if ext == e {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(exts, ext)
 }
 
 // EmbedTimestamp returns currect time formatted to RFC3339 for Discord embeds
@@ -77,6 +67,7 @@ func MemberHasPermission(s *discordgo.Session, guildID string, userID string, pe
 			return false, err
 		}
 	}
+
 	g, err := s.Guild(guildID)
 	if err != nil {
 		return false, err
@@ -85,6 +76,7 @@ func MemberHasPermission(s *discordgo.Session, guildID string, userID string, pe
 	if g.OwnerID == userID {
 		return true, nil
 	}
+
 	// Iterate through the role IDs stored in member.Roles
 	// to check permissions
 	for _, roleID := range member.Roles {
@@ -92,6 +84,7 @@ func MemberHasPermission(s *discordgo.Session, guildID string, userID string, pe
 		if err != nil {
 			return false, err
 		}
+
 		if role.Permissions&permission != 0 {
 			return true, nil
 		}
@@ -110,6 +103,7 @@ func IsValidChannel(s *discordgo.Session, guildID string, channelID string) bool
 	if ch.GuildID == guildID {
 		return true
 	}
+
 	return false
 }
 
@@ -124,7 +118,9 @@ func FormatBool(b bool) string {
 func FormatChannel(id string) string {
 	if id == "" {
 		return "-"
-	} else if strings.HasPrefix(id, "<#") {
+	}
+
+	if strings.HasPrefix(id, "<#") {
 		return id
 	}
 

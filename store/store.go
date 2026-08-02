@@ -30,6 +30,7 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 	if uri == "" {
 		uri = os.Getenv("MONGODB_URL")
 	}
+
 	if uri == "" {
 		return nil, fmt.Errorf("store: no MongoDB URI provided")
 	}
@@ -38,6 +39,7 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 	if dbName == "" {
 		dbName = os.Getenv("EUG_DB_NAME")
 	}
+
 	if dbName == "" {
 		dbName = DefaultDatabaseName
 	}
@@ -81,5 +83,6 @@ func (s *Store) Ping(ctx context.Context) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("store: not connected")
 	}
+
 	return s.client.Ping(ctx, nil)
 }

@@ -1,8 +1,4 @@
 // Package starboard implements the starboard reaction-tracking engine.
-//
-// The Starboarder owns the Discord session, store, and logger, and processes
-// reaction events sequentially per original-message-pair to avoid races.
-// Embed construction lives in the embed subpackage.
 package starboard
 
 import (
@@ -56,7 +52,6 @@ type Starboarder struct {
 	queues map[store.MessagePair]chan Event
 }
 
-// New returns a Starboarder bound to the given session and store.
 func New(session *discordgo.Session, st *store.Store, logger *slog.Logger) *Starboarder {
 	return &Starboarder{
 		session: session,
@@ -91,8 +86,6 @@ func (s *Starboarder) consume(pair store.MessagePair, ch chan Event) {
 	}
 }
 
-// --- Public entry points — called by event handlers ---
-
 // ReactionAdd handles a MessageReactionAdd event. The caller is responsible
 // for fetching the message and validating guild/emoji/bot checks before calling.
 func (s *Starboarder) ReactionAdd(e Event) {
@@ -113,8 +106,6 @@ func (s *Starboarder) MessageDeleted(e Event) {
 func (s *Starboarder) ReactionsCleared(e Event) {
 	s.Queue(e)
 }
-
-// --- Event dispatch ---
 
 func (s *Starboarder) handle(e Event, l *slog.Logger) error {
 	ctx := context.Background()
@@ -183,10 +174,12 @@ func (s *Starboarder) handleReactionRemove(ctx context.Context, e Event, l *slog
 	}
 
 	react := e.React
+
 	board, err := s.store.Messages.Repost(ctx, e.ChannelID, e.MessageID)
 	if err != nil {
 		return fmt.Errorf("fetching repost: %w", err)
 	}
+
 	if board == nil {
 		return nil
 	}
@@ -222,6 +215,7 @@ func (s *Starboarder) handleMessageDelete(ctx context.Context, e Event, l *slog.
 			return fmt.Errorf("fetching repost by starboard: %w", err)
 		}
 	}
+
 	if board == nil {
 		return nil
 	}
@@ -239,14 +233,13 @@ func (s *Starboarder) handleReactionsClear(ctx context.Context, e Event, l *slog
 	if err != nil {
 		return fmt.Errorf("fetching repost: %w", err)
 	}
+
 	if board == nil {
 		return nil
 	}
 
 	return s.deleteStarboard(ctx, board, l)
 }
-
-// --- Core operations ---
 
 // createStarboard posts a new starboard message and records the pairing.
 func (s *Starboarder) createStarboard(ctx context.Context, e Event, guild *store.Guild, react *discordgo.MessageReactions, l *slog.Logger) error {
@@ -303,10 +296,10 @@ func (s *Starboarder) updateStarboardFooter(ctx context.Context, board *store.Me
 	if err != nil {
 		return fmt.Errorf("editing starboard message: %w", err)
 	}
+
 	return nil
 }
 
-// deleteStarboard removes the starboard Discord message and its record.
 func (s *Starboarder) deleteStarboard(ctx context.Context, board *store.Message, l *slog.Logger) error {
 	l.Info("removing starboard", "starboard_id", board.Starboard.MessageID, "channel_id", board.Starboard.ChannelID)
 	if err := s.session.ChannelMessageDelete(board.Starboard.ChannelID, board.Starboard.MessageID); err != nil {
@@ -314,17 +307,17 @@ func (s *Starboarder) deleteStarboard(ctx context.Context, board *store.Message,
 			l.Warn("deleting starboard message", "err", err)
 		}
 	}
+
 	return s.deleteStarboardRecord(ctx, board, l)
 }
 
-// deleteStarboardRecord removes the starboard record from the store and
-// cleans up the per-message queue channel.
 func (s *Starboarder) deleteStarboardRecord(ctx context.Context, board *store.Message, l *slog.Logger) error {
 	if err := s.store.Messages.Delete(ctx, board.Original); err != nil {
 		l.Warn("deleting message record", "err", err)
 	}
 
 	pair := *board.Original
+
 	s.mu.Lock()
 	if ch, ok := s.queues[pair]; ok {
 		close(ch)

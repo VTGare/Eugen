@@ -19,7 +19,7 @@ const maxFileSize int64 = 8_388_608
 
 // mediaResult holds the file (if any) to upload, a function to
 // post-process the message content, and whether an image was set on
-// the embed builder (for stickers/URLs/embed images that aren't file uploads).
+// the embed builder.
 type mediaResult struct {
 	file     *discordgo.File
 	modify   func(content string) string
@@ -130,6 +130,7 @@ func fromEmbed(eb *embeds.Builder, embed *discordgo.MessageEmbed) mediaResult {
 		eb.Image(embed.Image.URL)
 		mr.hasImage = true
 	}
+
 	if embed.Thumbnail != nil {
 		eb.Image(embed.Thumbnail.ProxyURL)
 		mr.hasImage = true

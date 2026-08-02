@@ -159,16 +159,16 @@ func (g *Guild) BlacklistedToString() string {
 	if len(g.BlacklistedUsers) == 0 {
 		return "none"
 	}
+
 	fmt.Fprintf(&sb, "<@%v>", g.BlacklistedUsers[0])
 	if len(g.BlacklistedUsers) > 1 {
 		for _, user := range g.BlacklistedUsers[1:] {
 			fmt.Fprintf(&sb, "| <@%v>", user)
 		}
 	}
+
 	return sb.String()
 }
-
-// --- Cache methods ---
 
 func (c *GuildCache) CacheSet(g *Guild) {
 	c.mu.Lock()
@@ -203,14 +203,14 @@ func (g *Guilds) LoadIntoCache(ctx context.Context) (int, error) {
 
 	g.cache.mu.Lock()
 	defer g.cache.mu.Unlock()
+
 	g.cache.guilds = make(map[string]*Guild, len(guilds))
 	for _, guild := range guilds {
 		g.cache.guilds[guild.ID] = guild
 	}
+
 	return len(guilds), nil
 }
-
-// --- CRUD operations ---
 
 // All returns every guild document.
 func (g *Guilds) All(ctx context.Context) ([]*Guild, error) {
@@ -224,6 +224,7 @@ func (g *Guilds) All(ctx context.Context) ([]*Guild, error) {
 	if err := cur.All(ctx, &guilds); err != nil {
 		return nil, fmt.Errorf("store: decoding guilds: %w", err)
 	}
+
 	return guilds, nil
 }
 
@@ -232,6 +233,7 @@ func (g *Guilds) Insert(ctx context.Context, guild *Guild) error {
 	if _, err := g.col.InsertOne(ctx, guild); err != nil {
 		return fmt.Errorf("store: inserting guild %s: %w", guild.ID, err)
 	}
+
 	g.cache.CacheSet(guild)
 	return nil
 }
@@ -242,9 +244,11 @@ func (g *Guilds) InsertMany(ctx context.Context, guilds []*Guild) error {
 	for i, g := range guilds {
 		docs[i] = g
 	}
+
 	if _, err := g.col.InsertMany(ctx, docs); err != nil {
 		return fmt.Errorf("store: inserting %d guilds: %w", len(guilds), err)
 	}
+
 	for _, guild := range guilds {
 		g.cache.CacheSet(guild)
 	}
@@ -290,8 +294,6 @@ func (g *Guilds) SetField(ctx context.Context, guildID, field string, value any)
 	return guild, nil
 }
 
-// --- Guild mutation operations ---
-
 func (g *Guilds) BanChannel(ctx context.Context, guildID, channelID string) error {
 	return g.cacheAndReturn(ctx, guildID, bson.M{"$addToSet": bson.M{"banned": channelID}})
 }
@@ -308,9 +310,6 @@ func (g *Guilds) UnbanUser(ctx context.Context, guildID, userID string) error {
 	return g.cacheAndReturn(ctx, guildID, bson.M{"$pull": bson.M{"blacklisted_users": userID}})
 }
 
-// SetChannelStars sets a per-channel star requirement. If the channel already
-// has an override, it's updated via the positional operator; otherwise a new
-// entry is added.
 func (g *Guilds) SetChannelStars(ctx context.Context, guildID, channelID string, stars int) error {
 	cs := &ChannelSettings{ID: channelID, StarRequirement: stars}
 	now := time.Now()
@@ -327,6 +326,7 @@ func (g *Guilds) SetChannelStars(ctx context.Context, guildID, channelID string,
 		if !errors.Is(err, mongo.ErrNoDocuments) {
 			return fmt.Errorf("store: setting channel stars for %s in guild %s: %w", channelID, guildID, err)
 		}
+
 		// Channel not configured — add it.
 		res = g.col.FindOneAndUpdate(
 			ctx,
@@ -334,6 +334,7 @@ func (g *Guilds) SetChannelStars(ctx context.Context, guildID, channelID string,
 			bson.M{"$set": bson.M{"updated_at": now}, "$addToSet": bson.M{"channel_settings": cs}},
 			options.FindOneAndUpdate().SetReturnDocument(options.After),
 		)
+
 		guild = &Guild{}
 		if err := res.Decode(guild); err != nil {
 			return fmt.Errorf("store: adding channel stars for %s in guild %s: %w", channelID, guildID, err)
@@ -357,6 +358,7 @@ func (g *Guilds) CreateIndex(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("store: creating guilds unique index: %w", err)
 	}
+
 	return nil
 }
 
@@ -367,9 +369,11 @@ func (g *Guilds) cacheAndReturn(ctx context.Context, guildID string, mut bson.M)
 	if !ok {
 		set = bson.M{}
 	}
+
 	if _, exists := set["updated_at"]; !exists {
 		set["updated_at"] = time.Now()
 	}
+
 	mut["$set"] = set
 
 	res := g.col.FindOneAndUpdate(
@@ -378,10 +382,12 @@ func (g *Guilds) cacheAndReturn(ctx context.Context, guildID string, mut bson.M)
 		mut,
 		options.FindOneAndUpdate().SetReturnDocument(options.After),
 	)
+
 	guild := &Guild{}
 	if err := res.Decode(guild); err != nil {
 		return fmt.Errorf("store: mutating guild %s: %w", guildID, err)
 	}
+
 	g.cache.CacheSet(guild)
 	return nil
 }

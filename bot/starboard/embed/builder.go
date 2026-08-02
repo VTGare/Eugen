@@ -25,16 +25,12 @@ func NewEmbedBuilder(guild *store.Guild) *EmbedBuilder {
 	return &EmbedBuilder{guild: guild}
 }
 
-// BuildResult holds everything needed to send a starboard message.
 type BuildResult struct {
 	Send *discordgo.MessageSend
 }
 
-// Build produces the starboard message send payload for a Discord message
-// that has reached the reaction threshold. The effectiveCount is the
-// post-adjustment reaction count (after self-star exclusion if applicable).
-// selfStar indicates whether the message author reacted themselves.
-// Returns nil if the message has no content and no media.
+// Build produces the starboard message send payload for a Discord message that has reached
+// the reaction threshold. Returns nil if the message has no content and no media.
 func (b *EmbedBuilder) Build(ch *discordgo.Channel, message *discordgo.Message, react *discordgo.MessageReactions, effectiveCount int, selfStar bool) (*BuildResult, error) {
 	var (
 		eb         = embeds.NewBuilder()
@@ -78,8 +74,6 @@ func (b *EmbedBuilder) Build(ch *discordgo.Channel, message *discordgo.Message, 
 	return &BuildResult{Send: send}, nil
 }
 
-// footerIcon returns the CDN URL for the reaction emoji if it's a guild
-// custom emoji, otherwise the default star emoji URL.
 func (b *EmbedBuilder) footerIcon(react *discordgo.MessageReactions) string {
 	if b.guild.IsGuildEmoji() && react != nil && react.Emoji != nil {
 		return emojiURL(react.Emoji)

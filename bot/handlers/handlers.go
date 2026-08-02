@@ -71,9 +71,11 @@ func MessageReactionAdd(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageR
 		if guild == nil || !guild.Enabled || guild.StarboardChannel == "" {
 			return
 		}
+
 		if !guild.ValidateEmoji(&r.MessageReaction.Emoji) {
 			return
 		}
+
 		if guild.IsBanned(r.ChannelID) {
 			return
 		}
@@ -123,9 +125,11 @@ func MessageReactionRemove(b *bot.Bot) func(*discordgo.Session, *discordgo.Messa
 		if guild == nil || !guild.Enabled || guild.StarboardChannel == "" {
 			return
 		}
+
 		if !guild.ValidateEmoji(&r.MessageReaction.Emoji) {
 			return
 		}
+
 		if guild.IsBanned(r.ChannelID) {
 			return
 		}
@@ -149,6 +153,7 @@ func MessageReactionRemove(b *bot.Bot) func(*discordgo.Session, *discordgo.Messa
 		}
 
 		react := findReaction(msg, guild.StarEmote)
+
 		selfStar := msg.Author != nil && r.UserID == msg.Author.ID
 
 		b.Starboard.ReactionRemove(starboard.Event{

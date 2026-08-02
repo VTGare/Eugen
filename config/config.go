@@ -1,7 +1,3 @@
-// Package config handles all application configuration for Eugen.
-// It reads from environment variables (with sensible defaults) or
-// from a JSON configuration file, producing a single Config struct
-// that is threaded through the application.
 package config
 
 import (
@@ -54,23 +50,24 @@ func defaults() Config {
 func Load() (*Config, error) {
 	cfg := defaults()
 
-	// Try loading from JSON config file.
 	if path := os.Getenv("EUGEN_CONFIG"); path != "" {
 		if err := loadFile(path, &cfg); err != nil {
 			return nil, fmt.Errorf("config: loading JSON config: %w", err)
 		}
 	}
 
-	// Environment variables take precedence over file config.
 	if v := os.Getenv("EUGEN_BOT_TOKEN"); v != "" {
 		cfg.Bot.Token = v
 	}
+
 	if v := os.Getenv("EUGEN_MONGODB_URL"); v != "" {
 		cfg.MongoDB.URI = v
 	}
+
 	if v := os.Getenv("EUGEN_DB_NAME"); v != "" {
 		cfg.MongoDB.Database = v
 	}
+
 	if v := os.Getenv("EUGEN_DB_TIMEOUT"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
@@ -78,6 +75,7 @@ func Load() (*Config, error) {
 		}
 		cfg.MongoDB.ConnectTimeout = d
 	}
+
 	if v := os.Getenv("EUGEN_PREFIXES"); v != "" {
 		cfg.Bot.Prefixes = strings.Split(v, ",")
 	}
@@ -86,12 +84,15 @@ func Load() (*Config, error) {
 	if cfg.Bot.Token == "" {
 		return nil, fmt.Errorf("config: EUGEN_BOT_TOKEN environment variable is required")
 	}
+
 	if cfg.MongoDB.URI == "" {
 		return nil, fmt.Errorf("config: EUGEN_MONGODB_URL environment variable is required")
 	}
+
 	if cfg.MongoDB.Database == "" {
 		cfg.MongoDB.Database = defaultDatabase
 	}
+
 	if cfg.MongoDB.ConnectTimeout == 0 {
 		cfg.MongoDB.ConnectTimeout = defaultTimeout
 	}
