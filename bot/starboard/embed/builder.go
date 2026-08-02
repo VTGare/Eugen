@@ -37,13 +37,14 @@ func (b *EmbedBuilder) Build(ch *discordgo.Channel, message *discordgo.Message, 
 		messageURL = fmt.Sprintf("https://discord.com/channels/%v/%v/%v", message.GuildID, message.ChannelID, message.ID)
 	)
 
+	eb.Color(int(b.guild.EmbedColor)).
+		Timestamp(message.Timestamp).
+		AddField("Original message", fmt.Sprintf("[Click here](%v)", messageURL), true)
+
 	eb.Author(
 		fmt.Sprintf("@%v in #%v", message.Author.Username, ch.Name),
 		messageURL, message.Author.AvatarURL(""),
 	)
-	eb.Color(int(b.guild.EmbedColour))
-	eb.Timestamp(message.Timestamp)
-	eb.AddField("Original message", fmt.Sprintf("[Click here](%v)", messageURL), true)
 
 	footerText := fmt.Sprintf("%v", effectiveCount)
 	if selfStar {

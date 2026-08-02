@@ -32,7 +32,7 @@ type Guild struct {
 	ID                   string             `json:"guild_id" bson:"guild_id"`
 	Name                 string             `json:"name" bson:"name"`
 	StarEmote            string             `json:"emote" bson:"emote"`
-	EmbedColour          int64              `json:"color" bson:"color"`
+	EmbedColor           int64              `json:"color" bson:"color"`
 	Enabled              bool               `json:"enabled" bson:"enabled"`
 	StarboardChannel     string             `json:"starboard" bson:"starboard"`
 	NSFWStarboardChannel string             `json:"nsfwstarboard" bson:"nsfwstarboard"`
@@ -80,7 +80,7 @@ func NewGuild(guildName, guildID string) *Guild {
 		Enabled:              true,
 		Selfstar:             true,
 		IgnoreBots:           false,
-		EmbedColour:          4431601,
+		EmbedColor:           4431601,
 		StarboardChannel:     "",
 		NSFWStarboardChannel: "",
 		BlacklistedUsers:     make([]string, 0),
@@ -138,15 +138,16 @@ func (g *Guild) BannedChannelsToString() string {
 	if len(g.BannedChannels) == 0 {
 		return "none"
 	}
-	sb.WriteString(fmt.Sprintf("<#%v>``%v`` ", g.BannedChannels[0], g.BannedChannels[0]))
+	fmt.Fprintf(&sb, "<#%v>``%v`` ", g.BannedChannels[0], g.BannedChannels[0])
+
 	inRow := 1
 	if len(g.BannedChannels) > 1 {
 		for _, ch := range g.BannedChannels[1:] {
 			if inRow == 2 {
-				sb.WriteString(fmt.Sprintf("\n<#%v>``%v`` ", ch, ch))
+				fmt.Fprintf(&sb, "\n<#%v>``%v`` ", ch, ch)
 				inRow = 0
 			} else {
-				sb.WriteString(fmt.Sprintf("| <#%v>``%v``", ch, ch))
+				fmt.Fprintf(&sb, "| <#%v>``%v``", ch, ch)
 			}
 			inRow++
 		}
