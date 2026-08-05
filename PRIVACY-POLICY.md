@@ -20,16 +20,10 @@ When Eugen is added to a server, Discord provides data through the gateway
 based on the intents the bot is granted. Eugen requests the following privileged
 and standard intents:
 
-- **SERVER MEMBERS INTENT** — Used to identify user accounts in messages and
-  reactions so that the bot can detect self-stars (when the message author
-  reacts to their own message) and avoid starboarding its own reactions.
 - **MESSAGE CONTENT INTENT** — Required to read message content for the
   following purposes:
   - Parsing text-based commands (e.g. `e!set`, `e!ban`, `e!help`).
-  - Extracting URLs and attachments from messages so that images and videos can
-    be embedded alongside the starboard post.
-  - Rendering reply context in starboard embeds (showing the referenced message
-    content to provide context for the starred message).
+  - Extracting message content from messages so that it can be featured on the starboard.
 
 Message content is processed in memory only. **Eugen does not persist the text
 content of any message to its database.** Only message and channel identifiers
