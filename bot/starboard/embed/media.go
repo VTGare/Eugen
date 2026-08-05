@@ -17,9 +17,6 @@ import (
 // maxFileSize is the Discord upload limit for bot-sent files.
 const maxFileSize int64 = 10 << 20 // 10 MB
 
-// mediaResult holds the file (if any) to upload, a function to
-// post-process the message content, and whether an image was set on
-// the embed builder.
 type mediaResult struct {
 	file     *discordgo.File
 	modify   func(content string) string
@@ -86,12 +83,15 @@ func chainModify(first, second func(content string) string) func(content string)
 	if first == nil && second == nil {
 		return nil
 	}
+
 	if first == nil {
 		return second
 	}
+
 	if second == nil {
 		return first
 	}
+
 	return func(content string) string {
 		return second(first(content))
 	}
@@ -154,13 +154,16 @@ func fromURL(eb *embeds.Builder, eugURL *EugenURL) mediaResult {
 		if strings.HasSuffix(videoURL, "gifv") {
 			videoURL = strings.Replace(videoURL, "gifv", "mp4", 1)
 		}
+
 		file, err := downloadFile(videoURL)
 		if err != nil {
 			return mediaResult{err: err}
 		}
+
 		if file == nil {
 			eb.AddField("Attachment", fmt.Sprintf("[Click here](%v)", uri), true)
 		}
+
 		return mediaResult{file: file, modify: removeURL}
 	default:
 		return mediaResult{}
@@ -194,16 +197,19 @@ func fromEmbed(eb *embeds.Builder, embed *discordgo.MessageEmbed) mediaResult {
 		if embed.Description == "" {
 			return content
 		}
+
 		content += "\n\n"
 		if embed.Title != "" {
 			content += fmt.Sprintf("> %v", embed.Title)
 		} else if embed.Author != nil {
 			content += fmt.Sprintf("> %v", embed.Author.Name)
 		}
+
 		description := strings.ReplaceAll(embed.Description, "\n", "\n> ")
 		content += "\n> \n> " + description
 		return content
 	}
+
 	return mr
 }
 
