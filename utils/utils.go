@@ -3,26 +3,17 @@ package utils
 import (
 	"errors"
 	"fmt"
-	"regexp"
+	"log/slog"
+	"net/url"
+	"path"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/VTGare/Eugen/database"
 	"github.com/bwmarrin/discordgo"
-	log "github.com/sirupsen/logrus"
 )
 
 var (
-	// ImageURLRegex is a regex for image URLs
-	ImageURLRegex = regexp.MustCompile(`(?i)(http(s?):)([/|.|\w|\s|-])*\.(?:jpg|jpeg|gif|png|webp)(?:(?:\?|&)\w+=\w+)*`)
-	// VideoURLRegex ...
-	VideoURLRegex = regexp.MustCompile(`(?i)(?:http(?:s?):)(?:[/|.|\w|\s|-])*\.(mp4|webm|mov|gifv)(?:(?:\?|&)\w+=\w+)*`)
-	// YoutubeRegex ...
-	YoutubeRegex = regexp.MustCompile(`(?i)https?:\/\/(?:www\.)?youtu(?:be)?\.(?:com|be)\/(?:watch\?v=)?\S+`)
-	// NumRegex is a terrible number regex. Gonna replace it with better code.
-	NumRegex = regexp.MustCompile(`([0-9]+)`)
-	// EmojiRegex matches some Unicode emojis, it's not perfect but better than nothing
-	EmojiRegex = regexp.MustCompile(`(\x{00a9}|\x{00ae}|[\x{2000}-\x{3300}]|\x{d83c}[\x{d000}-\x{dfff}]|\x{d83d}[\x{d000}-\x{dfff}]|\x{d83e}[\x{d000}-\x{dfff}])`)
 	// EmbedColor is a default Discord embed color
 	EmbedColor = 16744576
 	// ErrNotEnoughArguments is a default error when not enough arguments were given
@@ -30,40 +21,42 @@ var (
 	// ErrParsingArgument is a default error when provided arguments couldn't be parsed
 	ErrParsingArgument = errors.New("error parsing arguments, please make sure all arguments are integers")
 	// ErrNoPermission is a default error when user doesn't have enough permissions to execute a command
-	ErrNoPermission = errors.New("you don't have permissions to execute this command")
+	ErrNoPermission = errors.New("you don't have enough permission to execute this command")
 )
+
+var (
+	// imageExtensions covers all image formats Discord supports for embeds:
+	// https://discord.com/developers/docs/reference#image-resource-limits
+	imageExtensions = []string{
+		".apng", ".avif", ".bmp", ".gif", ".jpg", ".jpeg",
+		".png", ".svg", ".tiff", ".tif", ".webp",
+	}
+	// videoExtensions covers all video formats Discord supports for embeds.
+	videoExtensions = []string{
+		".mp4", ".webm", ".mov", ".avi", ".mkv", ".wmv", ".mpg", ".mpeg", ".gifv",
+	}
+)
+
+func IsImageURL(uri string) bool {
+	return hasExtension(uri, imageExtensions)
+}
+
+func IsVideoURL(uri string) bool {
+	return hasExtension(uri, videoExtensions)
+}
+
+func hasExtension(uri string, exts []string) bool {
+	parsed, err := url.Parse(uri)
+	if err != nil {
+		return false
+	}
+	ext := strings.ToLower(path.Ext(parsed.Path))
+	return slices.Contains(exts, ext)
+}
 
 // EmbedTimestamp returns currect time formatted to RFC3339 for Discord embeds
 func EmbedTimestamp() string {
 	return time.Now().Format(time.RFC3339)
-}
-
-func CreateDB(eventGuilds []*discordgo.Guild) error {
-	allGuilds := database.AllGuilds()
-	for _, guild := range allGuilds {
-		database.GuildCache[guild.ID] = guild
-	}
-
-	newGuilds := make([]interface{}, 0)
-	for _, guild := range eventGuilds {
-		if _, ok := database.GuildCache[guild.ID]; !ok {
-			log.Infoln(guild.ID, "not found in database. Adding...")
-			g := database.NewGuild(guild.Name, guild.ID)
-			newGuilds = append(newGuilds, g)
-			database.GuildCache[g.ID] = g
-		}
-	}
-
-	if len(newGuilds) > 0 {
-		err := database.InsertManyGuilds(newGuilds)
-		if err != nil {
-			return err
-		}
-		log.Infoln("Successfully inserted all current guilds.")
-	}
-
-	log.Infoln(fmt.Sprintf("Connected to %v guilds", len(eventGuilds)))
-	return nil
 }
 
 // MemberHasPermission checks if guild member has a permission to do something on a server.
@@ -74,6 +67,7 @@ func MemberHasPermission(s *discordgo.Session, guildID string, userID string, pe
 			return false, err
 		}
 	}
+
 	g, err := s.Guild(guildID)
 	if err != nil {
 		return false, err
@@ -82,6 +76,7 @@ func MemberHasPermission(s *discordgo.Session, guildID string, userID string, pe
 	if g.OwnerID == userID {
 		return true, nil
 	}
+
 	// Iterate through the role IDs stored in member.Roles
 	// to check permissions
 	for _, roleID := range member.Roles {
@@ -89,6 +84,7 @@ func MemberHasPermission(s *discordgo.Session, guildID string, userID string, pe
 		if err != nil {
 			return false, err
 		}
+
 		if role.Permissions&permission != 0 {
 			return true, nil
 		}
@@ -100,13 +96,14 @@ func MemberHasPermission(s *discordgo.Session, guildID string, userID string, pe
 func IsValidChannel(s *discordgo.Session, guildID string, channelID string) bool {
 	ch, err := s.Channel(channelID)
 	if err != nil {
-		log.Warnln("IsValidChannel(): ", err)
+		slog.Warn("validating channel", "err", err)
 		return false
 	}
 
 	if ch.GuildID == guildID {
 		return true
 	}
+
 	return false
 }
 
@@ -121,7 +118,9 @@ func FormatBool(b bool) string {
 func FormatChannel(id string) string {
 	if id == "" {
 		return "-"
-	} else if strings.HasPrefix(id, "<#") {
+	}
+
+	if strings.HasPrefix(id, "<#") {
 		return id
 	}
 
@@ -163,7 +162,7 @@ func BaseEmbed(s *discordgo.Session) *discordgo.MessageEmbed {
 func CreatePrompt(s *discordgo.Session, m *discordgo.MessageCreate, embed *discordgo.MessageEmbed) string {
 	prompt, err := s.ChannelMessageSendEmbed(m.ChannelID, embed)
 	if err != nil {
-		log.Warnln("CreatePrompt() -> s.ChannelMessageSendEmbed(): ", err)
+		slog.Warn("creating prompt", "err", err)
 		return ""
 	}
 
