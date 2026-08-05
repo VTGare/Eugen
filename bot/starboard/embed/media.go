@@ -14,8 +14,8 @@ import (
 	"mvdan.cc/xurls/v2"
 )
 
-// maxFileSize is the Discord upload limit for bot-sent files (8 MB).
-const maxFileSize int64 = 8_388_608
+// maxFileSize is the Discord upload limit for bot-sent files.
+const maxFileSize int64 = 10 << 20 // 10 MB
 
 // mediaResult holds the file (if any) to upload, a function to
 // post-process the message content, and whether an image was set on
@@ -27,32 +27,74 @@ type mediaResult struct {
 	err      error
 }
 
-// extract determines the dominant media for a message and returns either
-// a downloadable file, a content modifier, or both.
+// extract processes multiple media types from a message.
+// When multiple media types are present, higher-priority media takes
+// precedence in conflicts (e.g., setting the embed image).
 func extract(eb *embeds.Builder, message *discordgo.Message) mediaResult {
-	// Stickers take lowest priority — anything else overrides.
+	var result mediaResult
+
+	// Process stickers first. Gets overwritten by anything that comes after.
 	if len(message.StickerItems) != 0 {
 		sticker := message.StickerItems[0]
 		eb.Image(stickerURL(sticker))
-		return mediaResult{hasImage: true}
+		result.hasImage = true
 	}
 
-	// Attachments always win over URL-embed extraction.
+	// Process attachments.
 	if len(message.Attachments) > 0 {
-		return fromAttachments(eb, message)
+		attachmentResult := fromAttachments(eb, message)
+		if attachmentResult.err != nil {
+			return mediaResult{err: attachmentResult.err}
+		}
+
+		result.file = attachmentResult.file
+		result.hasImage = attachmentResult.hasImage || result.hasImage
 	}
 
-	// Single image/video URL on its own.
+	// Process standalone URLs.
 	if urls := findURLs(message.Content); len(urls) > 0 {
-		return fromURL(eb, message, urls[0])
+		urlResult := fromURL(eb, urls[0])
+		if urlResult.err != nil {
+			return mediaResult{err: urlResult.err}
+		}
+
+		result.file = urlResult.file
+		result.hasImage = urlResult.hasImage || result.hasImage
+		result.modify = chainModify(result.modify, urlResult.modify)
 	}
 
-	// Rich embed (YouTube link, etc).
+	// Process embeds.
 	if len(message.Embeds) > 0 {
-		return fromEmbed(eb, message.Embeds[0])
+		embedResult := fromEmbed(eb, message.Embeds[0])
+		if embedResult.err != nil {
+			return mediaResult{err: embedResult.err}
+		}
+
+		if result.file == nil {
+			result.file = embedResult.file
+		}
+
+		result.hasImage = embedResult.hasImage || result.hasImage
+		result.modify = chainModify(result.modify, embedResult.modify)
 	}
 
-	return mediaResult{}
+	return result
+}
+
+// chainModify chains two modify functions together
+func chainModify(first, second func(content string) string) func(content string) string {
+	if first == nil && second == nil {
+		return nil
+	}
+	if first == nil {
+		return second
+	}
+	if second == nil {
+		return first
+	}
+	return func(content string) string {
+		return second(first(content))
+	}
 }
 
 func fromAttachments(eb *embeds.Builder, message *discordgo.Message) mediaResult {
@@ -64,18 +106,17 @@ func fromAttachments(eb *embeds.Builder, message *discordgo.Message) mediaResult
 
 	if utils.IsImageURL(first.URL) {
 		eb.Image(first.URL)
-		result.modify = func(content string) string {
-			return strings.Replace(content, first.URL, "", 1)
-		}
 		result.hasImage = true
 	} else {
 		file, err := downloadFile(first.URL)
 		if err != nil {
 			return mediaResult{err: err}
 		}
+
 		if file == nil {
 			eb.AddField("Attachment", fmt.Sprintf("[Click here](%v)", first.URL), true)
 		}
+
 		result.file = file
 	}
 
@@ -86,17 +127,28 @@ func fromAttachments(eb *embeds.Builder, message *discordgo.Message) mediaResult
 	return result
 }
 
-func fromURL(eb *embeds.Builder, message *discordgo.Message, eugURL *EugenURL) mediaResult {
+func fromURL(eb *embeds.Builder, eugURL *EugenURL) mediaResult {
 	uri := eugURL.URL.String()
 
 	removeURL := func(content string) string {
 		return strings.Replace(content, uri, "", 1)
 	}
 
+	conditionalRemoveURL := func(eb *embeds.Builder, imageURL string) func(content string) string {
+		return func(content string) string {
+			embed := eb.Finalize()
+			if embed.Image != nil && embed.Image.URL == imageURL {
+				return removeURL(content)
+			}
+
+			return content
+		}
+	}
+
 	switch eugURL.Type {
 	case URLTypeImage:
 		eb.Image(uri)
-		return mediaResult{modify: removeURL, hasImage: true}
+		return mediaResult{modify: conditionalRemoveURL(eb, uri), hasImage: true}
 	case URLTypeVideo:
 		videoURL := uri
 		if strings.HasSuffix(videoURL, "gifv") {
@@ -110,15 +162,6 @@ func fromURL(eb *embeds.Builder, message *discordgo.Message, eugURL *EugenURL) m
 			eb.AddField("Attachment", fmt.Sprintf("[Click here](%v)", uri), true)
 		}
 		return mediaResult{file: file, modify: removeURL}
-	case URLTypeImgur:
-		eb.Image(fmt.Sprintf("https://i.imgur.com/%v.png", eugURL.URL.Path))
-		if len(message.Embeds) == 0 {
-			return mediaResult{modify: removeURL, hasImage: true}
-		}
-		if message.Embeds[0].Thumbnail != nil {
-			eb.Image(message.Embeds[0].Thumbnail.ProxyURL)
-		}
-		return mediaResult{modify: removeURL, hasImage: true}
 	default:
 		return mediaResult{}
 	}
@@ -132,7 +175,12 @@ func fromEmbed(eb *embeds.Builder, embed *discordgo.MessageEmbed) mediaResult {
 	}
 
 	if embed.Thumbnail != nil {
-		eb.Image(embed.Thumbnail.ProxyURL)
+		if embed.Thumbnail.URL != "" {
+			eb.Image(embed.Thumbnail.URL)
+		} else {
+			eb.Image(embed.Thumbnail.ProxyURL)
+		}
+
 		mr.hasImage = true
 	}
 
@@ -178,8 +226,6 @@ func findURLs(content string) []*EugenURL {
 			eu.Type = URLTypeImage
 		case utils.IsVideoURL(uri):
 			eu.Type = URLTypeVideo
-		case strings.Contains(parsed.Host, "imgur"):
-			eu.Type = URLTypeImgur
 		default:
 			continue
 		}
