@@ -14,13 +14,11 @@ const starEmojiURL = "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.3/assets/
 
 // EmbedBuilder constructs a starboard embed for a Discord message that has
 // reached the reaction threshold. It encapsulates all media extraction,
-// content modification, and embed formatting logic so the starboard engine
-// can focus on the reaction-count lifecycle.
+// content modification, and embed formatting logic.
 type EmbedBuilder struct {
 	guild *store.Guild
 }
 
-// NewEmbedBuilder creates a builder bound to the given guild settings.
 func NewEmbedBuilder(guild *store.Guild) *EmbedBuilder {
 	return &EmbedBuilder{guild: guild}
 }
@@ -68,6 +66,7 @@ func (b *EmbedBuilder) Build(ch *discordgo.Channel, message *discordgo.Message, 
 	send := &discordgo.MessageSend{
 		Embeds: []*discordgo.MessageEmbed{embed},
 	}
+
 	if file != nil {
 		send.Files = []*discordgo.File{file}
 	}
@@ -79,20 +78,22 @@ func (b *EmbedBuilder) footerIcon(react *discordgo.MessageReactions) string {
 	if b.guild.IsGuildEmoji() && react != nil && react.Emoji != nil {
 		return emojiURL(react.Emoji)
 	}
+
 	return starEmojiURL
 }
 
 // UpdateFooter rewrites the footer text and icon on an existing starboard
-// embed to reflect the new reaction count. This avoids rebuilding the
-// entire embed on every count change.
+// embed to reflect the new reaction count.
 func (b *EmbedBuilder) UpdateFooter(embed *discordgo.MessageEmbed, count int, selfStar bool, react *discordgo.MessageReactions) {
 	text := fmt.Sprintf("%v", count)
 	if selfStar {
 		text += " | self-starred"
 	}
+
 	if embed.Footer == nil {
 		embed.Footer = &discordgo.MessageEmbedFooter{}
 	}
+
 	embed.Footer.Text = text
 	embed.Footer.IconURL = b.footerIcon(react)
 }
@@ -113,13 +114,16 @@ func (b *EmbedBuilder) buildContent(eb *embeds.Builder, message *discordgo.Messa
 	if len(message.MessageSnapshots) > 0 {
 		fmsg := message.MessageSnapshots[0].Message
 		content = fmsg.Content
+
 		snapshotFile, snapshotModify, snapshotHasImage, err := b.extractSnapshot(eb, fmsg)
 		if err != nil {
 			return "", nil, false, err
 		}
+
 		if snapshotModify != nil {
 			content = snapshotModify(content)
 		}
+
 		hasMedia = hasMedia || snapshotHasImage || snapshotFile != nil
 		eb.AddField("Forwarded message", fmt.Sprintf(
 			"[Click here](https://discord.com/channels/%v/%v/%v)",
@@ -127,6 +131,7 @@ func (b *EmbedBuilder) buildContent(eb *embeds.Builder, message *discordgo.Messa
 			message.MessageReference.ChannelID,
 			message.MessageReference.MessageID,
 		))
+
 		if snapshotFile != nil {
 			return content, snapshotFile, hasMedia, nil
 		}
@@ -160,6 +165,7 @@ func (b *EmbedBuilder) extractSnapshot(eb *embeds.Builder, fmsg *discordgo.Messa
 	if mr.err != nil {
 		return nil, nil, false, mr.err
 	}
+
 	return mr.file, mr.modify, mr.hasImage, nil
 }
 
@@ -170,5 +176,6 @@ func emojiURL(emoji *discordgo.Emoji) string {
 	} else {
 		u += "png"
 	}
+
 	return u
 }

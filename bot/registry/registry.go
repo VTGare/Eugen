@@ -53,6 +53,7 @@ func (r *Registry) Get(name string) *Command {
 			return cmd
 		}
 	}
+
 	return nil
 }
 
@@ -61,6 +62,7 @@ func (r *Registry) Groups() []*CommandGroup {
 	for _, g := range r.groups {
 		out = append(out, g)
 	}
+
 	return out
 }
 

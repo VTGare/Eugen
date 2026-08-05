@@ -209,6 +209,7 @@ func (s *Starboarder) handleMessageDelete(ctx context.Context, e Event, l *slog.
 	if err != nil {
 		return fmt.Errorf("fetching repost: %w", err)
 	}
+
 	if board == nil {
 		board, err = s.store.Messages.RepostByStarboard(ctx, e.DeletedChannel, e.DeletedMessage)
 		if err != nil {
@@ -343,5 +344,6 @@ func isNotFound(err error) bool {
 			return ok
 		}
 	}
+
 	return false
 }
