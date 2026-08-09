@@ -46,10 +46,6 @@ func defaultPrefix(b *bot.Bot, guildID string) string {
 	return "e!"
 }
 
-// sendCommandList builds a flattened embed listing every visible command
-// across all groups. Group headers are intentionally omitted: the help command
-// only resolves command names, never group names. Commands are sorted
-// alphabetically by name for deterministic output.
 func sendCommandList(s *discordgo.Session, m *discordgo.MessageCreate, b *bot.Bot, prefix string) error {
 	eb := embeds.NewBuilder().
 		Title("Commands").

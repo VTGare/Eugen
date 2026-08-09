@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"slices"
 	"strings"
 
 	"github.com/VTGare/Eugen/bot"
@@ -79,40 +78,12 @@ func MessageReactionAdd(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageR
 			return
 		}
 
-		msg, err := s.ChannelMessage(r.ChannelID, r.MessageID)
-		if err != nil {
-			b.Logger().Warn("fetching message", "err", err, "channel_id", r.ChannelID, "message_id", r.MessageID)
-			return
-		}
-		msg.GuildID = r.GuildID
-
-		if msg.Author != nil {
-			if msg.Author.ID == s.State.User.ID {
-				return
-			}
-			if msg.Author.Bot && guild.IgnoreBots {
-				return
-			}
-			if slices.Contains(guild.BlacklistedUsers, msg.Author.ID) {
-				return
-			}
-		}
-
-		react := findReaction(msg, guild.StarEmote)
-		if react == nil {
-			return
-		}
-
-		selfStar := msg.Author != nil && r.UserID == msg.Author.ID
-
 		b.Starboard.ReactionAdd(starboard.Event{
 			Type:      starboard.EventReactionAdd,
 			ChannelID: r.ChannelID,
 			MessageID: r.MessageID,
 			GuildID:   r.GuildID,
-			React:     react,
-			Message:   msg,
-			SelfStar:  selfStar,
+			UserID:    r.UserID,
 		})
 	}
 }
@@ -133,36 +104,12 @@ func MessageReactionRemove(b *bot.Bot) func(*discordgo.Session, *discordgo.Messa
 			return
 		}
 
-		msg, err := s.ChannelMessage(r.ChannelID, r.MessageID)
-		if err != nil {
-			b.Logger().Warn("fetching message", "err", err, "channel_id", r.ChannelID, "message_id", r.MessageID)
-			return
-		}
-
-		if msg.Author != nil {
-			if msg.Author.ID == s.State.User.ID {
-				return
-			}
-			if msg.Author.Bot && guild.IgnoreBots {
-				return
-			}
-			if slices.Contains(guild.BlacklistedUsers, msg.Author.ID) {
-				return
-			}
-		}
-
-		react := findReaction(msg, guild.StarEmote)
-
-		selfStar := msg.Author != nil && r.UserID == msg.Author.ID
-
 		b.Starboard.ReactionRemove(starboard.Event{
 			Type:      starboard.EventReactionRemove,
 			ChannelID: r.ChannelID,
 			MessageID: r.MessageID,
 			GuildID:   r.GuildID,
-			React:     react,
-			Message:   msg,
-			SelfStar:  selfStar,
+			UserID:    r.UserID,
 		})
 	}
 }
@@ -171,25 +118,20 @@ func MessageReactionRemove(b *bot.Bot) func(*discordgo.Session, *discordgo.Messa
 func MessageReactionRemoveAll(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageReactionRemoveAll) {
 	return func(s *discordgo.Session, r *discordgo.MessageReactionRemoveAll) {
 		guild := b.Store.Guilds.Get(b.Context(), r.GuildID)
-		if guild == nil {
+		if guild == nil || !guild.Enabled || guild.StarboardChannel == "" {
 			return
 		}
 
-		msg, err := s.ChannelMessage(r.ChannelID, r.MessageID)
-		if err != nil {
-			b.Logger().Warn("fetching message", "err", err, "channel_id", r.ChannelID, "message_id", r.MessageID)
+		if guild.IsBanned(r.ChannelID) {
 			return
 		}
 
-		if guild.Enabled && guild.StarboardChannel != "" && !guild.IsBanned(r.ChannelID) && msg.Author.ID != s.State.User.ID {
-			b.Starboard.ReactionsCleared(starboard.Event{
-				Type:      starboard.EventReactionsClear,
-				ChannelID: r.ChannelID,
-				MessageID: r.MessageID,
-				GuildID:   r.GuildID,
-				Message:   msg,
-			})
-		}
+		b.Starboard.ReactionsCleared(starboard.Event{
+			Type:      starboard.EventReactionsClear,
+			ChannelID: r.ChannelID,
+			MessageID: r.MessageID,
+			GuildID:   r.GuildID,
+		})
 	}
 }
 
@@ -227,14 +169,4 @@ func GuildCreate(b *bot.Bot) func(*discordgo.Session, *discordgo.GuildCreate) {
 
 		b.Logger().Info("joined guild", "guild_id", g.ID, "guild_name", g.Name)
 	}
-}
-
-// findReaction finds a reaction on a message that matches the given emote.
-func findReaction(message *discordgo.Message, emote string) *discordgo.MessageReactions {
-	for _, r := range message.Reactions {
-		if strings.EqualFold(r.Emoji.MessageFormat(), emote) {
-			return r
-		}
-	}
-	return nil
 }

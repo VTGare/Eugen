@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"sync/atomic"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -252,32 +253,33 @@ var _ = Describe("MessageReactionAdd handler", func() {
 		Expect(requests.Load()).To(BeZero())
 	})
 
-	It("fetches the message when all checks pass", func() {
+	It("enqueues the event without fetching when all checks pass", func() {
 		configureGuild(fx, true, "starboard1", "\u2b50")
 
 		var requests atomic.Int32
-		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
+		fx.sess.On("/channels/chan1/messages/msg1", func(req *http.Request) ([]byte, int) {
 			requests.Add(1)
-			if req.Method == http.MethodGet {
-				// Return a message with no matching star reaction so the
-				// handler returns at findReaction without calling Starboarder.
-				return jsonMarshal(&discordgo.Message{
-					ID:        "msg1",
-					Author:    &discordgo.User{ID: "author1"},
-					Reactions: []*discordgo.MessageReactions{},
-				}), 200
-			}
-			return jsonMarshal(&discordgo.Message{ID: "resp"}), 200
+			// No star reaction: the worker drops the event after fetching.
+			return jsonMarshal(&discordgo.Message{
+				ID:        "msg1",
+				ChannelID: "chan1",
+				Author:    &discordgo.User{ID: "author1"},
+				Reactions: []*discordgo.MessageReactions{},
+			}), 200
 		})
 
 		handlers.MessageReactionAdd(fx.b)(fx.sess.Session, &discordgo.MessageReactionAdd{
 			MessageReaction: &discordgo.MessageReaction{
 				GuildID: "guild1", ChannelID: "chan1", MessageID: "msg1",
-				Emoji: discordgo.Emoji{ID: "", Name: "\u2b50"},
+				Emoji:  discordgo.Emoji{ID: "", Name: "\u2b50"},
+				UserID: "reactor1",
 			},
 		})
 
-		Expect(requests.Load()).To(BeNumerically(">=", 1), "message should be fetched when all checks pass")
+		// The handler itself performs no API calls, but the starboard worker
+		// must fetch the message when it processes the queued event.
+		Eventually(func() int32 { return requests.Load() }).Should(BeNumerically(">=", 1),
+			"the worker should fetch the message for the queued event")
 	})
 })
 
@@ -369,7 +371,7 @@ var _ = Describe("MessageReactionRemoveAll handler", func() {
 		Expect(requests.Load()).To(BeZero())
 	})
 
-	It("does not call Starboarder when guild is disabled", func() {
+	It("does not enqueue or fetch when guild is disabled", func() {
 		configureGuild(fx, false, "starboard1", "")
 
 		var requests atomic.Int32
@@ -387,10 +389,10 @@ var _ = Describe("MessageReactionRemoveAll handler", func() {
 			},
 		})
 
-		Eventually(func() int32 { return requests.Load() }).Should(BeNumerically(">=", 1), "message should be fetched")
+		Expect(requests.Load()).To(BeZero(), "no fetch should happen for disabled guilds")
 	})
 
-	It("does not call Starboarder when starboard channel is empty", func() {
+	It("does not enqueue or fetch when starboard channel is empty", func() {
 		configureGuild(fx, true, "", "")
 
 		var requests atomic.Int32
@@ -408,10 +410,10 @@ var _ = Describe("MessageReactionRemoveAll handler", func() {
 			},
 		})
 
-		Eventually(func() int32 { return requests.Load() }).Should(BeNumerically(">=", 1), "message should be fetched")
+		Expect(requests.Load()).To(BeZero(), "no fetch should happen without a starboard channel")
 	})
 
-	It("does not call Starboarder when message author is the bot", func() {
+	It("enqueues the event when all checks pass", func() {
 		configureGuild(fx, true, "starboard1", "")
 
 		var requests atomic.Int32
@@ -419,7 +421,7 @@ var _ = Describe("MessageReactionRemoveAll handler", func() {
 			requests.Add(1)
 			return jsonMarshal(&discordgo.Message{
 				ID:     "msg1",
-				Author: &discordgo.User{ID: "123456789"}, // bot's own ID
+				Author: &discordgo.User{ID: "author1"},
 			}), 200
 		})
 
@@ -429,7 +431,9 @@ var _ = Describe("MessageReactionRemoveAll handler", func() {
 			},
 		})
 
-		Eventually(func() int32 { return requests.Load() }).Should(BeNumerically(">=", 1))
+		// The handler performs no API calls; nothing observable happens for
+		// an unstarboarded message, so this only proves no early return.
+		Consistently(requests.Load, 50*time.Millisecond).Should(BeZero())
 	})
 })
 
