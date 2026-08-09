@@ -26,12 +26,7 @@ type Store struct {
 }
 
 func New(ctx context.Context, cfg Config) (*Store, error) {
-	uri := cfg.URI
-	if uri == "" {
-		uri = os.Getenv("MONGODB_URL")
-	}
-
-	if uri == "" {
+	if cfg.URI == "" {
 		return nil, fmt.Errorf("store: no MongoDB URI provided")
 	}
 
@@ -52,14 +47,14 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 	connectCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	client, err := mongo.Connect(options.Client().ApplyURI(uri))
+	client, err := mongo.Connect(options.Client().ApplyURI(cfg.URI))
 	if err != nil {
 		return nil, fmt.Errorf("store: connecting to MongoDB: %w", err)
 	}
 
 	if err := client.Ping(connectCtx, nil); err != nil {
 		_ = client.Disconnect(context.Background())
-		return nil, fmt.Errorf("store: pinging MongoDB (%s): %w", uri, err)
+		return nil, fmt.Errorf("store: pinging MongoDB (%s): %w", cfg.URI, err)
 	}
 
 	db := client.Database(dbName)
