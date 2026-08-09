@@ -10,9 +10,12 @@ import (
 	"github.com/VTGare/Eugen/bot/registry"
 	"github.com/VTGare/Eugen/bot/starboard"
 	"github.com/VTGare/Eugen/store"
-	"github.com/VTGare/Eugen/utils"
+	"github.com/VTGare/embeds"
 	"github.com/bwmarrin/discordgo"
 )
+
+// EmbedColor is a default Discord embed color.
+const EmbedColor = 16744576
 
 // Bot is the central application struct. It holds the Discord session,
 // the persistence store, the command registry, and the starboard engine.
@@ -142,16 +145,13 @@ func (b *Bot) TrimPrefix(content, guildID string) string {
 func (b *Bot) HandleError(s *discordgo.Session, channelID string, err error) {
 	if err != nil {
 		b.log.Error("handling error", "err", err)
-		embed := &discordgo.MessageEmbed{
-			Title: "Oops, something went wrong!",
-			Thumbnail: &discordgo.MessageEmbedThumbnail{
-				URL: "https://i.imgur.com/OZ1Al5h.png",
-			},
-			Description: fmt.Sprintf("***Error message:***\n%v\n", err),
-			Color:       utils.EmbedColor,
-			Timestamp:   utils.EmbedTimestamp(),
-		}
-		s.ChannelMessageSendEmbed(channelID, embed)
+
+		eb := BaseEmbed(s).
+			Title("Oops, something went wrong!").
+			Thumbnail("https://i.imgur.com/OZ1Al5h.png").
+			Description(fmt.Sprintf("***Error message:***\n%v\n", err))
+
+		s.ChannelMessageSendEmbed(channelID, eb.Finalize())
 	}
 }
 
@@ -220,6 +220,14 @@ func (b *Bot) LoadGuildCache() {
 	} else {
 		b.log.Info("cached guilds", "count", n)
 	}
+}
+
+// BaseEmbed returns a bare embed with the bot's avatar and the default color.
+func BaseEmbed(s *discordgo.Session) *embeds.Builder {
+	return embeds.NewBuilder().
+		Color(EmbedColor).
+		Timestamp(time.Now()).
+		Thumbnail(s.State.User.AvatarURL(""))
 }
 
 func startsWithMention(content, mention string) bool {

@@ -6,7 +6,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/VTGare/Eugen/utils"
+	"github.com/VTGare/Eugen/bot/commands"
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -240,7 +240,7 @@ var _ = Describe("ban command", func() {
 			},
 		}
 		err := cmd.Exec(fx.sess.Session, m, nil)
-		Expect(err).To(MatchError(utils.ErrNotEnoughArguments))
+		Expect(err).To(MatchError(commands.ErrNotEnoughArguments))
 	})
 })
 
@@ -297,7 +297,7 @@ var _ = Describe("unban command", func() {
 			},
 		}
 		err := cmd.Exec(fx.sess.Session, m, nil)
-		Expect(err).To(MatchError(utils.ErrNotEnoughArguments))
+		Expect(err).To(MatchError(commands.ErrNotEnoughArguments))
 	})
 })
 
@@ -354,7 +354,7 @@ var _ = Describe("blacklist command", func() {
 			},
 		}
 		err := cmd.Exec(fx.sess.Session, m, nil)
-		Expect(err).To(MatchError(utils.ErrNotEnoughArguments))
+		Expect(err).To(MatchError(commands.ErrNotEnoughArguments))
 	})
 })
 
@@ -411,7 +411,7 @@ var _ = Describe("unblacklist command", func() {
 			},
 		}
 		err := cmd.Exec(fx.sess.Session, m, nil)
-		Expect(err).To(MatchError(utils.ErrNotEnoughArguments))
+		Expect(err).To(MatchError(commands.ErrNotEnoughArguments))
 	})
 })
 
@@ -468,7 +468,7 @@ var _ = Describe("req command", func() {
 			},
 		}
 		err := cmd.Exec(fx.sess.Session, m, nil)
-		Expect(err).To(MatchError(utils.ErrNotEnoughArguments))
+		Expect(err).To(MatchError(commands.ErrNotEnoughArguments))
 	})
 })
 

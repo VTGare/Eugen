@@ -7,6 +7,7 @@ require (
 	github.com/bwmarrin/discordgo v0.29.0
 	github.com/onsi/ginkgo/v2 v2.32.0
 	github.com/onsi/gomega v1.42.1
+	github.com/samber/lo v1.53.0
 	github.com/testcontainers/testcontainers-go v0.43.0
 	go.mongodb.org/mongo-driver/v2 v2.8.0
 	mvdan.cc/xurls/v2 v2.6.0

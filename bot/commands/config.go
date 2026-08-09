@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strconv"
 	"strings"
@@ -12,14 +13,14 @@ import (
 
 	"github.com/VTGare/Eugen/bot"
 	"github.com/VTGare/Eugen/store"
-	"github.com/VTGare/Eugen/utils"
 	"github.com/VTGare/embeds"
 	"github.com/bwmarrin/discordgo"
+	"github.com/samber/lo"
 )
 
 func ban(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string) error {
 	return func(s *discordgo.Session, m *discordgo.MessageCreate, args []string) error {
-		ok, err := utils.MemberHasPermission(s, m.GuildID, m.Author.ID, discordgo.PermissionAdministrator|discordgo.PermissionManageServer)
+		ok, err := memberHasPermission(s, m.GuildID, m.Author.ID, discordgo.PermissionAdministrator|discordgo.PermissionManageServer)
 		if err != nil {
 			return err
 		}
@@ -29,7 +30,7 @@ func ban(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string
 		}
 
 		if len(args) == 0 {
-			return utils.ErrNotEnoughArguments
+			return ErrNotEnoughArguments
 		}
 
 		guild := b.Store.Guilds.Cache().Get(m.GuildID)
@@ -60,17 +61,17 @@ func ban(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string
 			}
 		}
 
-		embed := utils.BaseEmbed(s)
-		embed.Title = "✅ Successfully banned channels"
-		embed.Description = fmt.Sprintf("List of banned channels:\n%v", banned)
-		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		embed := bot.BaseEmbed(s)
+		embed.Title("✅ Successfully banned channels")
+		embed.Description(fmt.Sprintf("List of banned channels:\n%v", banned))
+		s.ChannelMessageSendEmbed(m.ChannelID, embed.Finalize())
 		return nil
 	}
 }
 
 func unban(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string) error {
 	return func(s *discordgo.Session, m *discordgo.MessageCreate, args []string) error {
-		ok, err := utils.MemberHasPermission(s, m.GuildID, m.Author.ID, discordgo.PermissionAdministrator|discordgo.PermissionManageServer)
+		ok, err := memberHasPermission(s, m.GuildID, m.Author.ID, discordgo.PermissionAdministrator|discordgo.PermissionManageServer)
 		if err != nil {
 			return err
 		}
@@ -80,7 +81,7 @@ func unban(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []stri
 		}
 
 		if len(args) == 0 {
-			return utils.ErrNotEnoughArguments
+			return ErrNotEnoughArguments
 		}
 
 		guild := b.Store.Guilds.Cache().Get(m.GuildID)
@@ -98,22 +99,22 @@ func unban(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []stri
 			}
 		}
 
-		embed := utils.BaseEmbed(s)
+		embed := bot.BaseEmbed(s)
 		if len(unbanned) > 0 {
-			embed.Title = "✅ Successfully unbanned channels"
-			embed.Description = fmt.Sprintf("List of unbanned channels:\n%v", unbanned)
+			embed.Title("✅ Successfully unbanned channels")
+			embed.Description(fmt.Sprintf("List of unbanned channels:\n%v", unbanned))
 		} else {
-			embed.Title = "❎ Failed to unban channels"
-			embed.Description = "No channels were unbanned"
+			embed.Title("❎ Failed to unban channels")
+			embed.Description("No channels were unbanned")
 		}
-		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		s.ChannelMessageSendEmbed(m.ChannelID, embed.Finalize())
 		return nil
 	}
 }
 
 func blacklist(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string) error {
 	return func(s *discordgo.Session, m *discordgo.MessageCreate, args []string) error {
-		ok, err := utils.MemberHasPermission(s, m.GuildID, m.Author.ID, discordgo.PermissionAdministrator|discordgo.PermissionManageServer)
+		ok, err := memberHasPermission(s, m.GuildID, m.Author.ID, discordgo.PermissionAdministrator|discordgo.PermissionManageServer)
 		if err != nil {
 			return err
 		}
@@ -123,7 +124,7 @@ func blacklist(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []
 		}
 
 		if len(args) == 0 {
-			return utils.ErrNotEnoughArguments
+			return ErrNotEnoughArguments
 		}
 
 		guild := b.Store.Guilds.Cache().Get(m.GuildID)
@@ -144,17 +145,18 @@ func blacklist(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []
 			blacklisted = append(blacklisted, fmt.Sprintf("<@%v>", arg))
 		}
 
-		embed := utils.BaseEmbed(s)
-		embed.Title = "✅ Successfully blacklisted users"
-		embed.Description = fmt.Sprintf("List of blacklisted users:\n%v", blacklisted)
-		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		embed := bot.BaseEmbed(s).
+			Title("✅ Successfully blacklisted users").
+			Description(fmt.Sprintf("List of blacklisted users:\n%v", blacklisted))
+
+		s.ChannelMessageSendEmbed(m.ChannelID, embed.Finalize())
 		return nil
 	}
 }
 
 func unblacklist(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string) error {
 	return func(s *discordgo.Session, m *discordgo.MessageCreate, args []string) error {
-		ok, err := utils.MemberHasPermission(s, m.GuildID, m.Author.ID, discordgo.PermissionAdministrator|discordgo.PermissionManageServer)
+		ok, err := memberHasPermission(s, m.GuildID, m.Author.ID, discordgo.PermissionAdministrator|discordgo.PermissionManageServer)
 		if err != nil {
 			return err
 		}
@@ -164,7 +166,7 @@ func unblacklist(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, 
 		}
 
 		if len(args) == 0 {
-			return utils.ErrNotEnoughArguments
+			return ErrNotEnoughArguments
 		}
 
 		guild := b.Store.Guilds.Cache().Get(m.GuildID)
@@ -182,17 +184,18 @@ func unblacklist(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, 
 			}
 		}
 
-		embed := utils.BaseEmbed(s)
-		embed.Title = "✅ Successfully unblacklisted users"
-		embed.Description = fmt.Sprintf("List of unblacklisted users:\n%v", unblacklisted)
-		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		embed := bot.BaseEmbed(s).
+			Title("✅ Successfully unblacklisted users").
+			Description(fmt.Sprintf("List of unblacklisted users:\n%v", unblacklisted))
+
+		s.ChannelMessageSendEmbed(m.ChannelID, embed.Finalize())
 		return nil
 	}
 }
 
 func req(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string) error {
 	return func(s *discordgo.Session, m *discordgo.MessageCreate, args []string) error {
-		ok, err := utils.MemberHasPermission(s, m.GuildID, m.Author.ID, discordgo.PermissionAdministrator|discordgo.PermissionManageServer)
+		ok, err := memberHasPermission(s, m.GuildID, m.Author.ID, discordgo.PermissionAdministrator|discordgo.PermissionManageServer)
 		if err != nil {
 			return err
 		}
@@ -202,7 +205,7 @@ func req(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string
 		}
 
 		if len(args) < 2 {
-			return utils.ErrNotEnoughArguments
+			return ErrNotEnoughArguments
 		}
 
 		g := b.Store.Guilds.Cache().Get(m.GuildID)
@@ -212,7 +215,7 @@ func req(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string
 		if !slices.ContainsFunc(g.ChannelSettings, func(ch *store.ChannelSettings) bool {
 			return ch.ID == channelID
 		}) {
-			if !utils.IsValidChannel(s, m.GuildID, channelID) {
+			if !isValidChannel(s, m.GuildID, channelID) {
 				return fmt.Errorf("Unable to get channel <#%v>. Please make sure Eugen has permissions to see the channel.", channelID)
 			}
 		}
@@ -232,7 +235,7 @@ func req(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string
 		} else {
 			stars, err := strconv.Atoi(args[1])
 			if err != nil {
-				return utils.ErrParsingArgument
+				return ErrParsingArgument
 			}
 			if stars < 1 {
 				return fmt.Errorf("Star requirement should be >= 1, provided star requirement is %v", stars)
@@ -295,7 +298,7 @@ var guildSetters = map[string]guildSetter{
 		return v, gs.SetPrefix(ctx, m.GuildID, v)
 	},
 	"emote": func(ctx context.Context, gs *store.Guilds, s *discordgo.Session, m *discordgo.MessageCreate, raw string) (string, error) {
-		v, err := utils.GetEmoji(s, m.GuildID, raw)
+		v, err := getEmoji(s, m.GuildID, raw)
 		if err != nil {
 			return "", errors.New("argument's either a global emoji or not one at all")
 		}
@@ -336,13 +339,13 @@ func set(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string
 		case 0:
 			showGuildSettings(s, m, b)
 		case 2:
-			ok, err := utils.MemberHasPermission(s, m.GuildID, m.Author.ID, discordgo.PermissionAdministrator)
+			ok, err := memberHasPermission(s, m.GuildID, m.Author.ID, discordgo.PermissionAdministrator)
 			if err != nil {
 				return err
 			}
 
 			if !ok {
-				return utils.ErrNoPermission
+				return ErrNoPermission
 			}
 
 			setter, ok := guildSetters[args[0]]
@@ -374,9 +377,11 @@ func showGuildSettings(s *discordgo.Session, m *discordgo.MessageCreate, b *bot.
 	settings := b.Store.Guilds.Cache().Get(m.GuildID)
 	guild, _ := s.Guild(settings.ID)
 
-	banned := strings.Join(utils.Map(settings.BannedChannels, func(s string) string {
+	bannedChannels := lo.Map(settings.BannedChannels, func(s string, _ int) string {
 		return fmt.Sprintf("<#%v>", s)
-	}), " | ")
+	})
+
+	banned := strings.Join(bannedChannels, " | ")
 	if banned == "" {
 		banned = "none"
 	}
@@ -388,9 +393,9 @@ func showGuildSettings(s *discordgo.Session, m *discordgo.MessageCreate, b *bot.
 		Thumbnail(guild.IconURL("320")).
 		Timestamp(time.Now())
 
-	eb.AddField("Starboard", fmt.Sprintf("**%v**\n**Starboard channel:** %v", utils.FormatBool(settings.Enabled), utils.FormatChannel(settings.StarboardChannel)), false)
+	eb.AddField("Starboard", fmt.Sprintf("**%v**\n**Starboard channel:** %v", formatBool(settings.Enabled), formatChannel(settings.StarboardChannel)), false)
 	eb.AddField("General settings", fmt.Sprintf("**Emote:** %v | **Prefix:** %v | **Color:** %v", settings.StarEmote, settings.Prefix, settings.EmbedColor), false)
-	eb.AddField("Behavior settings", fmt.Sprintf("**Selfstar:** %v | **Ignore bots:** %v | **Min stars:** %v", utils.FormatBool(settings.Selfstar), utils.FormatBool(settings.IgnoreBots), settings.MinimumStars), false)
+	eb.AddField("Behavior settings", fmt.Sprintf("**Selfstar:** %v | **Ignore bots:** %v | **Min stars:** %v", formatBool(settings.Selfstar), formatBool(settings.IgnoreBots), settings.MinimumStars), false)
 	eb.AddField("Unique star requirements", settings.ChannelSettingsToString(), false)
 	eb.AddField("Blacklisted users", settings.BlacklistedToString(), false)
 	eb.AddField("Banned channels", settings.BannedChannelsToString(), false)
@@ -447,7 +452,7 @@ type setupStep func() (advanced bool, err error)
 
 func setup(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string) error {
 	return func(s *discordgo.Session, m *discordgo.MessageCreate, args []string) error {
-		ok, err := utils.MemberHasPermission(s, m.GuildID, m.Author.ID, discordgo.PermissionAdministrator|discordgo.PermissionManageGuild)
+		ok, err := memberHasPermission(s, m.GuildID, m.Author.ID, discordgo.PermissionAdministrator|discordgo.PermissionManageGuild)
 		if err != nil {
 			return err
 		}
@@ -475,12 +480,12 @@ func setup(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []stri
 					Title("Eugen Setup | Step 1: Starboard channel").
 					Description("To complete this step **mention a starboard channel.**\n\nType ``cancel`` or ``exit`` to quit the setup.").
 					Thumbnail(s.State.User.AvatarURL("")).
-					Color(utils.EmbedColor).
+					Color(bot.EmbedColor).
 					Timestamp(time.Now())
 
 				res := ""
 				for !(res == "cancel" || res == "exit") {
-					res = utils.CreatePrompt(s, m, eb.Finalize())
+					res = createPrompt(s, m, eb.Finalize())
 
 					if chID, ok := verifyStarboardChannel(s, m.GuildID, res); ok {
 						starboard = "<#" + chID + ">"
@@ -502,12 +507,12 @@ func setup(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []stri
 					Title("Eugen Setup | Step 2: Minimum stars").
 					Description(fmt.Sprintf("**Current settings:**\nStarboard channel: %v\n\nTo complete this step **type an integer number**.\n\nType ``cancel`` or ``exit`` to cancel the setup.\nType ``previous`` to come back to a previous step", starboard)).
 					Thumbnail(s.State.User.AvatarURL("")).
-					Color(utils.EmbedColor).
+					Color(bot.EmbedColor).
 					Timestamp(time.Now())
 
 				res := ""
 				for !(res == "cancel" || res == "exit" || res == "previous") {
-					res = utils.CreatePrompt(s, m, eb.Finalize())
+					res = createPrompt(s, m, eb.Finalize())
 
 					if num, err := strconv.Atoi(res); err == nil {
 						minstars = num
@@ -534,14 +539,14 @@ func setup(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []stri
 					Title("Eugen Setup | Step 3: Star emote").
 					Description(fmt.Sprintf("**Current settings:**\nStarboard channel: %v\nMinimum stars: %v\n\nTo complete this step **send a guild emote or type default.**\n\nType ``cancel`` or ``exit`` to cancel the setup.\nType ``previous`` to come back to a previous step", starboard, minstars)).
 					Thumbnail(s.State.User.AvatarURL("")).
-					Color(utils.EmbedColor).
+					Color(bot.EmbedColor).
 					Timestamp(time.Now())
 
 				res := ""
 				for !(res == "cancel" || res == "exit" || res == "previous" || res == "default") {
-					res = utils.CreatePrompt(s, m, eb.Finalize())
+					res = createPrompt(s, m, eb.Finalize())
 
-					if e, err := utils.GetEmoji(s, m.GuildID, res); err == nil {
+					if e, err := getEmoji(s, m.GuildID, res); err == nil {
 						emote = e
 						break
 					}
@@ -570,12 +575,12 @@ func setup(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []stri
 					Title("Eugen Setup | Step 4: Selfstar").
 					Description(fmt.Sprintf("**Current settings:**\nStarboard channel: %v\nMinimum stars: %v\nEmote: %v\n\nTo complete this step **type ``true`` to allow self-starring or ``false`` to not count self-stars.**\n\nType ``cancel`` or ``exit`` to cancel the setup.\nType ``previous`` to come back to a previous step", starboard, minstars, emote)).
 					Thumbnail(s.State.User.AvatarURL("")).
-					Color(utils.EmbedColor).
+					Color(bot.EmbedColor).
 					Timestamp(time.Now())
 
 				res := ""
 				for !(res == "true" || res == "false" || res == "cancel" || res == "exit" || res == "previous") {
-					res = utils.CreatePrompt(s, m, eb.Finalize())
+					res = createPrompt(s, m, eb.Finalize())
 				}
 
 				if res == "cancel" || res == "exit" {
@@ -602,14 +607,14 @@ func setup(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []stri
 			func() (bool, error) {
 				eb := embeds.NewBuilder().
 					Title("Eugen Setup | Step 5: Embed color").
-					Description(fmt.Sprintf("**Current settings:**\nStarboard channel: %v\nMinimum stars: %v\nEmote: %v\nSelf-star: %v\n\nTo complete this step **send a hexadecimal color or integer up to 16777215 or default.**\n\nType ``cancel`` or ``exit`` to cancel the setup.\nType ``previous`` to come back to a previous step", starboard, minstars, emote, utils.FormatBool(selfstar))).
+					Description(fmt.Sprintf("**Current settings:**\nStarboard channel: %v\nMinimum stars: %v\nEmote: %v\nSelf-star: %v\n\nTo complete this step **send a hexadecimal color or integer up to 16777215 or default.**\n\nType ``cancel`` or ``exit`` to cancel the setup.\nType ``previous`` to come back to a previous step", starboard, minstars, emote, formatBool(selfstar))).
 					Thumbnail(s.State.User.AvatarURL("")).
-					Color(utils.EmbedColor).
+					Color(bot.EmbedColor).
 					Timestamp(time.Now())
 
 				res := ""
 				for !(res == "cancel" || res == "exit" || res == "previous" || res == "default") {
-					res = utils.CreatePrompt(s, m, eb.Finalize())
+					res = createPrompt(s, m, eb.Finalize())
 
 					if c, ok := parseColor(res); ok {
 						color = c
@@ -648,7 +653,7 @@ func setup(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []stri
 		}
 
 		eb := embeds.NewBuilder().
-			Color(utils.EmbedColor).
+			Color(bot.EmbedColor).
 			Timestamp(time.Now())
 
 		if !exit {
@@ -669,7 +674,7 @@ func setup(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []stri
 					AddField("Starboard channel", starboard, true).
 					AddField("Minimum stars", fmt.Sprintf("%v", minstars), true).
 					AddField("Emote", emote, true).
-					AddField("Self-star", utils.FormatBool(selfstar), true).
+					AddField("Self-star", formatBool(selfstar), true).
 					AddField("Embed color", "applied to this embed :)", true)
 			}
 		} else {
@@ -679,4 +684,62 @@ func setup(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []stri
 		s.ChannelMessageSendEmbed(m.ChannelID, eb.Finalize())
 		return nil
 	}
+}
+
+func memberHasPermission(s *discordgo.Session, guildID string, userID string, permission int64) (bool, error) {
+	member, err := s.State.Member(guildID, userID)
+	if err != nil {
+		if member, err = s.GuildMember(guildID, userID); err != nil {
+			return false, err
+		}
+	}
+
+	g, err := s.Guild(guildID)
+	if err != nil {
+		return false, err
+	}
+
+	if g.OwnerID == userID {
+		return true, nil
+	}
+
+	// Iterate through the role IDs stored in member.Roles
+	// to check permissions.
+	for _, roleID := range member.Roles {
+		role, err := s.State.Role(guildID, roleID)
+		if err != nil {
+			return false, err
+		}
+
+		if role.Permissions&permission != 0 {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func isValidChannel(s *discordgo.Session, guildID string, channelID string) bool {
+	ch, err := s.Channel(channelID)
+	if err != nil {
+		slog.Warn("validating channel", "err", err)
+		return false
+	}
+
+	return ch.GuildID == guildID
+}
+
+func getEmoji(s *discordgo.Session, guildID, e string) (string, error) {
+	emojis, err := s.GuildEmojis(guildID)
+	if err != nil {
+		return "", err
+	}
+
+	for _, emoji := range emojis {
+		if str := fmt.Sprintf("<:%v>", strings.ToLower(emoji.APIName())); str == e {
+			return str, nil
+		}
+	}
+
+	return e, nil
 }

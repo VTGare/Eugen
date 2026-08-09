@@ -7,22 +7,17 @@ import (
 
 	"github.com/VTGare/Eugen/bot"
 	"github.com/VTGare/Eugen/bot/registry"
-	"github.com/VTGare/Eugen/utils"
 	"github.com/VTGare/embeds"
 	"github.com/bwmarrin/discordgo"
 )
 
 func ping(*bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string) error {
 	return func(s *discordgo.Session, m *discordgo.MessageCreate, args []string) error {
-		embed := utils.BaseEmbed(s)
-		embed.Title = "🏓 Pong!"
-		embed.Fields = []*discordgo.MessageEmbedField{{
-			Name:   "Heartbeat latency",
-			Value:  fmt.Sprintf("%v", s.HeartbeatLatency().Round(1*time.Millisecond)),
-			Inline: true,
-		}}
+		eb := bot.BaseEmbed(s).
+			Title("🏓 Pong!").
+			AddField("Latency", fmt.Sprintf("%v", s.HeartbeatLatency().Round(1*time.Millisecond)))
 
-		_, err := s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		_, err := s.ChannelMessageSendEmbed(m.ChannelID, eb.Finalize())
 		return err
 	}
 }
@@ -59,7 +54,7 @@ func sendCommandList(s *discordgo.Session, m *discordgo.MessageCreate, b *bot.Bo
 	eb := embeds.NewBuilder().
 		Title("Commands").
 		Description(fmt.Sprintf("Use ``%vhelp <command name>`` for extended help on a specific command.", prefix)).
-		Color(utils.EmbedColor).
+		Color(bot.EmbedColor).
 		Thumbnail(s.State.User.AvatarURL("")).
 		Timestamp(time.Now())
 
@@ -114,7 +109,7 @@ func sendCommandHelp(s *discordgo.Session, m *discordgo.MessageCreate, b *bot.Bo
 
 	eb := embeds.NewBuilder().
 		Title(fmt.Sprintf("%v - help", command.Name)).
-		Color(utils.EmbedColor).
+		Color(bot.EmbedColor).
 		Thumbnail(s.State.User.AvatarURL("")).
 		Timestamp(time.Now())
 
@@ -128,14 +123,11 @@ func sendCommandHelp(s *discordgo.Session, m *discordgo.MessageCreate, b *bot.Bo
 
 func invite(*bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string) error {
 	return func(s *discordgo.Session, m *discordgo.MessageCreate, args []string) error {
-		embed := &discordgo.MessageEmbed{
-			Title:       "Thanks for spreading the word!",
-			Description: "Eugen loves you 💖\nhttps://discord.com/api/oauth2/authorize?client_id=738399095378673786&permissions=379968&scope=bot",
-			Thumbnail:   &discordgo.MessageEmbedThumbnail{URL: s.State.User.AvatarURL("")},
-			Color:       utils.EmbedColor,
-			Timestamp:   utils.EmbedTimestamp(),
-		}
-		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		eb := bot.BaseEmbed(s).
+			Title("Invite link").
+			Description("https://discord.com/api/oauth2/authorize?client_id=738399095378673786&permissions=379968&scope=bot")
+
+		s.ChannelMessageSendEmbed(m.ChannelID, eb.Finalize())
 		return nil
 	}
 }

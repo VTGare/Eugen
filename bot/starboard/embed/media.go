@@ -6,9 +6,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
+	"slices"
 	"strings"
 
-	"github.com/VTGare/Eugen/utils"
 	"github.com/VTGare/embeds"
 	"github.com/bwmarrin/discordgo"
 	"mvdan.cc/xurls/v2"
@@ -104,7 +105,7 @@ func fromAttachments(eb *embeds.Builder, message *discordgo.Message) mediaResult
 		result mediaResult
 	)
 
-	if utils.IsImageURL(first.URL) {
+	if isImageURL(first.URL) {
 		eb.Image(first.URL)
 		result.hasImage = true
 	} else {
@@ -228,9 +229,9 @@ func findURLs(content string) []*EugenURL {
 		eu := &EugenURL{URL: parsed}
 
 		switch {
-		case utils.IsImageURL(uri):
+		case isImageURL(uri):
 			eu.Type = URLTypeImage
-		case utils.IsVideoURL(uri):
+		case isVideoURL(uri):
 			eu.Type = URLTypeVideo
 		default:
 			continue
@@ -308,4 +309,35 @@ func stickerURL(sticker *discordgo.StickerItem) string {
 	}
 
 	return fmt.Sprintf("https://cdn.discordapp.com/stickers/%v%v", sticker.ID, ext)
+}
+
+// Covers all media formats Discord supports for embeds as of Aug 2026:
+// https://discord.com/developers/docs/reference#image-resource-limits
+var (
+	imageExtensions = []string{
+		".apng", ".avif", ".bmp", ".gif", ".jpg", ".jpeg",
+		".png", ".svg", ".tiff", ".tif", ".webp",
+	}
+
+	videoExtensions = []string{
+		".mp4", ".webm", ".mov", ".avi", ".mkv", ".wmv", ".mpg", ".mpeg", ".gifv",
+	}
+)
+
+func isImageURL(uri string) bool {
+	return hasMediaExtension(uri, imageExtensions)
+}
+
+func isVideoURL(uri string) bool {
+	return hasMediaExtension(uri, videoExtensions)
+}
+
+func hasMediaExtension(uri string, exts []string) bool {
+	parsed, err := url.Parse(uri)
+	if err != nil {
+		return false
+	}
+
+	ext := strings.ToLower(path.Ext(parsed.Path))
+	return slices.Contains(exts, ext)
 }
