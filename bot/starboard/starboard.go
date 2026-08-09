@@ -473,8 +473,13 @@ func (s *Starboarder) handleReaction(ctx context.Context, e Event) error {
 	// or delete it entirely when the reaction count no longer qualifies.
 	moved := board.Starboard.ChannelID != guild.StarboardChannel
 	if moved && count >= required {
-		if err := s.deleteStarboard(ctx, board, s.log); err != nil {
-			return err
+		err := s.session.ChannelMessageDelete(board.Starboard.ChannelID, board.Starboard.MessageID)
+		if err != nil && !isNotFound(err) {
+			return fmt.Errorf("deleting old starboard post: %w", err)
+		}
+
+		if err := s.store.Messages.Delete(ctx, board.Original); err != nil {
+			return fmt.Errorf("deleting old starboard record: %w", err)
 		}
 
 		s.log.Info("moving starboard to new channel",
@@ -511,7 +516,15 @@ func (s *Starboarder) handleMessageDelete(ctx context.Context, e Event) error {
 	}
 
 	// The deleted message was the starboard post itself, only the record
-	// needs cleanup.
+	// needs cleanup. A move may have replaced the record's post since the
+	// event was routed, only touch the record when it still points at the
+	// deleted message.
+	if board.Starboard == nil ||
+		board.Starboard.ChannelID != e.DeletedChannel ||
+		board.Starboard.MessageID != e.DeletedMessage {
+		return nil
+	}
+
 	return s.deleteStarboardRecord(ctx, board, s.log)
 }
 

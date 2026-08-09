@@ -351,6 +351,97 @@ var _ = Describe("Starboarder processing", func() {
 		Expect(posts.Load()).To(BeZero())
 	})
 
+	It("moves the starboard back when the channel changes again", func() {
+		fx.seedRecord()
+		fx.mockOriginal(fxAuthor, false, star(4))
+		fx.mockChannel()
+
+		var postsToB, postsToA atomic.Int32
+		fx.sess.On("/channels/sb2/messages", func(req *http.Request) ([]byte, int) {
+			if req.Method != http.MethodPost {
+				return nil, 405
+			}
+			postsToB.Add(1)
+			return testutil.JSON(&discordgo.Message{ID: "sb2msg", ChannelID: "sb2"}, 200)(req)
+		})
+		fx.sess.On("/channels/"+fxSBChan+"/messages", func(req *http.Request) ([]byte, int) {
+			if req.Method != http.MethodPost {
+				return nil, 405
+			}
+			postsToA.Add(1)
+			return testutil.JSON(&discordgo.Message{ID: "sb1msg2", ChannelID: fxSBChan}, 200)(req)
+		})
+		var sb1Deletes atomic.Int32
+		fx.sess.On("/channels/"+fxSBChan+"/messages/"+fxSBMsg, func(req *http.Request) ([]byte, int) {
+			if req.Method != http.MethodDelete {
+				return nil, 405
+			}
+			sb1Deletes.Add(1)
+			return nil, 204
+		})
+		var sb2Deletes atomic.Int32
+		fx.sess.On("/channels/sb2/messages/sb2msg", func(req *http.Request) ([]byte, int) {
+			if req.Method != http.MethodDelete {
+				return nil, 405
+			}
+			sb2Deletes.Add(1)
+			return nil, 204
+		})
+
+		Expect(fx.st.Guilds.Update(context.Background(), fxGuildID, store.GuildPatch{StarboardChannel: lo.ToPtr("sb2")})).To(Succeed())
+		fx.sb.ReactionAdd(addEvent())
+
+		Eventually(func() int32 { return postsToB.Load() }).Should(BeNumerically("==", 1))
+		Expect(fx.record().Starboard).To(Equal(&store.MessagePair{ChannelID: "sb2", MessageID: "sb2msg"}))
+		Expect(sb1Deletes.Load()).To(BeNumerically("==", 1))
+
+		Expect(fx.st.Guilds.Update(context.Background(), fxGuildID, store.GuildPatch{StarboardChannel: lo.ToPtr(fxSBChan)})).To(Succeed())
+		fx.sb.ReactionAdd(addEvent())
+
+		Eventually(func() int32 { return postsToA.Load() }).Should(BeNumerically("==", 1))
+		Expect(fx.record().Starboard).To(Equal(&store.MessagePair{ChannelID: fxSBChan, MessageID: "sb1msg2"}))
+		Expect(sb2Deletes.Load()).To(BeNumerically("==", 1),
+			"the post in the retired channel must be deleted when moving back")
+	})
+
+	It("aborts the move when the old post cannot be deleted, then retries", func() {
+		fx.seedRecord()
+		Expect(fx.st.Guilds.Update(context.Background(), fxGuildID, store.GuildPatch{StarboardChannel: lo.ToPtr("sb2")})).To(Succeed())
+		fx.mockOriginal(fxAuthor, false, star(4))
+		fx.mockChannel()
+
+		var deleteCalls atomic.Int32
+		fx.sess.On("/channels/"+fxSBChan+"/messages/"+fxSBMsg, func(req *http.Request) ([]byte, int) {
+			if req.Method != http.MethodDelete {
+				return nil, 405
+			}
+			deleteCalls.Add(1)
+			if deleteCalls.Load() == 1 {
+				return nil, 500
+			}
+			return nil, 204
+		})
+		var posts atomic.Int32
+		fx.sess.On("/channels/sb2/messages", func(req *http.Request) ([]byte, int) {
+			if req.Method != http.MethodPost {
+				return nil, 405
+			}
+			posts.Add(1)
+			return testutil.JSON(&discordgo.Message{ID: "sb2msg", ChannelID: "sb2"}, 200)(req)
+		})
+
+		fx.sb.ReactionAdd(addEvent())
+		time.Sleep(150 * time.Millisecond)
+		Expect(posts.Load()).To(BeZero(), "a failed old-post delete must abort the move")
+		Expect(fx.record().Starboard).To(Equal(&store.MessagePair{ChannelID: fxSBChan, MessageID: fxSBMsg}),
+			"the record must survive a failed move so it can retry")
+
+		fx.sb.ReactionAdd(addEvent())
+		Eventually(func() int32 { return posts.Load() }).Should(BeNumerically("==", 1))
+		Expect(fx.record().Starboard).To(Equal(&store.MessagePair{ChannelID: "sb2", MessageID: "sb2msg"}))
+		Expect(deleteCalls.Load()).To(BeNumerically("==", 2))
+	})
+
 	It("removes the starboard when reactions drop to half the threshold", func() {
 		fx.seedRecord()
 		fx.mockOriginal(fxAuthor, false, star(1)) // 3/2 = 1
