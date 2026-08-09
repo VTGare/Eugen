@@ -468,7 +468,22 @@ func (s *Starboarder) handleReaction(ctx context.Context, e Event) error {
 		return nil
 	}
 
-	if count <= required/2 {
+	// The post lives in a channel that no longer is the starboard channel.
+	// Relocate the post by deleting the old one and reposting,
+	// or delete it entirely when the reaction count no longer qualifies.
+	moved := board.Starboard.ChannelID != guild.StarboardChannel
+	if moved && count >= required {
+		if err := s.deleteStarboard(ctx, board, s.log); err != nil {
+			return err
+		}
+
+		s.log.Info("moving starboard to new channel",
+			"old_channel_id", board.Starboard.ChannelID,
+			"new_channel_id", guild.StarboardChannel)
+		return s.createStarboard(ctx, msg, react, count, selfStar, guild)
+	}
+
+	if moved || count <= required/2 {
 		return s.deleteStarboard(ctx, board, s.log)
 	}
 

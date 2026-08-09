@@ -247,6 +247,110 @@ var _ = Describe("Starboarder processing", func() {
 		Expect(fx.record()).NotTo(BeNil(), "the record must survive footer updates")
 	})
 
+	It("moves the starboard to the new channel when the starboard channel changes", func() {
+		fx.seedRecord()
+		Expect(fx.st.Guilds.Update(context.Background(), fxGuildID, store.GuildPatch{StarboardChannel: lo.ToPtr("sb2")})).To(Succeed())
+		fx.mockOriginal(fxAuthor, false, star(4))
+		fx.mockChannel()
+
+		var deletes atomic.Int32
+		fx.sess.On("/channels/"+fxSBChan+"/messages/"+fxSBMsg, func(req *http.Request) ([]byte, int) {
+			if req.Method == http.MethodDelete {
+				deletes.Add(1)
+				return nil, 204
+			}
+			return nil, 405
+		})
+
+		var edits atomic.Int32
+		fx.sess.On("/channels/sb2/messages", func(req *http.Request) ([]byte, int) {
+			switch req.Method {
+			case http.MethodPost:
+				return testutil.JSON(&discordgo.Message{ID: "sb2msg", ChannelID: "sb2"}, 200)(req)
+			case http.MethodGet:
+				return testutil.JSON(&discordgo.Message{
+					ID:        "sb2msg",
+					ChannelID: "sb2",
+					Embeds:    []*discordgo.MessageEmbed{{Title: "starboard"}},
+				}, 200)(req)
+			case http.MethodPatch:
+				edits.Add(1)
+				return testutil.JSON(&discordgo.Message{ID: "sb2msg", ChannelID: "sb2"}, 200)(req)
+			}
+			return nil, 405
+		})
+
+		fx.sb.ReactionAdd(addEvent())
+
+		Eventually(func() int32 { return deletes.Load() }).Should(BeNumerically("==", 1),
+			"the old post must be retired")
+		rec := fx.record()
+		Expect(rec.Starboard).To(Equal(&store.MessagePair{ChannelID: "sb2", MessageID: "sb2msg"}),
+			"the record must point at the post in the new channel")
+
+		fx.sb.ReactionAdd(addEvent())
+		Eventually(func() int32 { return edits.Load() }).Should(BeNumerically("==", 1),
+			"later footer updates must hit the post in the new channel")
+	})
+
+	It("retires a starboard in a retired channel when the count dropped below the threshold", func() {
+		fx.seedRecord()
+		Expect(fx.st.Guilds.Update(context.Background(), fxGuildID, store.GuildPatch{StarboardChannel: lo.ToPtr("sb2")})).To(Succeed())
+		fx.mockOriginal(fxAuthor, false, star(2)) // required=3: survives in the band, but must not move
+		fx.mockChannel()
+
+		var deletes atomic.Int32
+		fx.sess.On("/channels/"+fxSBChan+"/messages/"+fxSBMsg, func(req *http.Request) ([]byte, int) {
+			if req.Method == http.MethodDelete {
+				deletes.Add(1)
+				return nil, 204
+			}
+			return nil, 405
+		})
+		var posts atomic.Int32
+		fx.sess.On("/channels/sb2/messages", func(req *http.Request) ([]byte, int) {
+			if req.Method == http.MethodPost {
+				posts.Add(1)
+			}
+			return nil, 405
+		})
+
+		fx.sb.ReactionAdd(addEvent())
+
+		Eventually(func() int32 { return deletes.Load() }).Should(BeNumerically("==", 1))
+		Eventually(fx.record).Should(BeNil(), "the record must be removed")
+		Expect(posts.Load()).To(BeZero(), "a sub-threshold message must not be reposted")
+	})
+
+	It("retires a starboard in a retired channel when the count is at half the threshold", func() {
+		fx.seedRecord()
+		Expect(fx.st.Guilds.Update(context.Background(), fxGuildID, store.GuildPatch{StarboardChannel: lo.ToPtr("sb2")})).To(Succeed())
+		fx.mockOriginal(fxAuthor, false, star(1)) // required=3: 3/2 = 1
+		fx.mockChannel()
+
+		var deletes atomic.Int32
+		fx.sess.On("/channels/"+fxSBChan+"/messages/"+fxSBMsg, func(req *http.Request) ([]byte, int) {
+			if req.Method == http.MethodDelete {
+				deletes.Add(1)
+				return nil, 204
+			}
+			return nil, 405
+		})
+		var posts atomic.Int32
+		fx.sess.On("/channels/sb2/messages", func(req *http.Request) ([]byte, int) {
+			if req.Method == http.MethodPost {
+				posts.Add(1)
+			}
+			return nil, 405
+		})
+
+		fx.sb.ReactionRemove(removeEvent())
+
+		Eventually(func() int32 { return deletes.Load() }).Should(BeNumerically("==", 1))
+		Eventually(fx.record).Should(BeNil())
+		Expect(posts.Load()).To(BeZero())
+	})
+
 	It("removes the starboard when reactions drop to half the threshold", func() {
 		fx.seedRecord()
 		fx.mockOriginal(fxAuthor, false, star(1)) // 3/2 = 1
