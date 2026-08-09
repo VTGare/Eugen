@@ -96,37 +96,33 @@ func (b *Bot) Logger() *slog.Logger {
 }
 
 // InitGuilds syncs guild data from the ready event into the store.
-// It loads all existing guilds into cache, then creates any guilds from
-// the Discord ready event that aren't already in the database.
 func (b *Bot) InitGuilds(eventGuilds []*discordgo.Guild) {
 	ctx := b.Context()
-	guilds, err := b.Store.Guilds.All(ctx)
+	known, err := b.Store.Guilds.List(ctx)
 	if err != nil {
 		b.log.Warn("loading guilds from db", "err", err)
 		return
 	}
 
-	cache := b.Store.Guilds.Cache()
-	for _, guild := range guilds {
-		cache.CacheSet(guild)
+	existing := make(map[string]bool, len(known))
+	for _, guild := range known {
+		existing[guild.ID] = true
 	}
 
 	newGuilds := make([]*store.Guild, 0)
 	for _, guild := range eventGuilds {
-		if cache.Get(guild.ID) == nil {
-			b.log.Info("guild not found in db, adding", "guild_id", guild.ID)
-			g := store.NewGuild(guild.Name, guild.ID)
-			newGuilds = append(newGuilds, g)
-			cache.CacheSet(g)
+		if existing[guild.ID] {
+			continue
 		}
+
+		b.log.Info("guild not found in db, adding", "guild_id", guild.ID)
+		newGuilds = append(newGuilds, store.NewGuild(guild.Name, guild.ID))
 	}
 
-	if len(newGuilds) > 0 {
-		if err := b.Store.Guilds.InsertMany(ctx, newGuilds); err != nil {
-			b.log.Warn("inserting new guilds", "err", err)
-		} else {
-			b.log.Info("inserted current guilds", "count", len(newGuilds))
-		}
+	if err := b.Store.Guilds.CreateMany(ctx, newGuilds); err != nil {
+		b.log.Warn("inserting new guilds", "err", err)
+	} else if len(newGuilds) > 0 {
+		b.log.Info("inserted current guilds", "count", len(newGuilds))
 	}
 
 	b.log.Info("connected to guilds", "count", len(eventGuilds))
@@ -135,7 +131,7 @@ func (b *Bot) InitGuilds(eventGuilds []*discordgo.Guild) {
 // TrimPrefix removes the command prefix from a message content string.
 // If the content does not start with any known prefix, it is returned unchanged.
 func (b *Bot) TrimPrefix(content, guildID string) string {
-	guild := b.Store.Guilds.Cache().Get(guildID)
+	guild := b.Store.Guilds.Get(b.Context(), guildID)
 
 	switch {
 	case startsWithMention(content, b.botMention):
@@ -229,24 +225,12 @@ func (b *Bot) Shutdown(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// CreateIndexes creates database indexes.
-func (b *Bot) CreateIndexes() error {
-	if err := b.Store.Guilds.CreateIndex(b.ctx); err != nil {
-		return fmt.Errorf("bot: creating guilds index: %w", err)
-	}
-
-	if err := b.Store.Messages.CreateIndex(b.ctx); err != nil {
-		return fmt.Errorf("bot: creating messages index: %w", err)
-	}
-
-	return nil
-}
-
-// LoadGuildCache seeds the guild cache from the database.
+// LoadGuildCache warms the guild cache from the database.
 func (b *Bot) LoadGuildCache() {
 	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
 	defer cancel()
-	if n, err := b.Store.Guilds.LoadIntoCache(ctx); err != nil {
+
+	if n, err := b.Store.Guilds.Refresh(ctx); err != nil {
 		b.log.Warn("seeding guild cache", "err", err)
 	} else {
 		b.log.Info("cached guilds", "count", n)

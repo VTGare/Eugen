@@ -80,7 +80,7 @@ func newBotFixture() *botFixture {
 
 func (f *botFixture) addTestGuild(guildID, name string) {
 	g := store.NewGuild(name, guildID)
-	f.b.Store.Guilds.Cache().CacheSet(g)
+	Expect(f.b.Store.Guilds.Create(context.Background(), g)).To(Succeed())
 
 	guild := &discordgo.Guild{
 		ID:      guildID,

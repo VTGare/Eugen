@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/VTGare/Eugen/bot/handlers"
+	"github.com/VTGare/Eugen/store"
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -20,6 +22,17 @@ func jsonMarshal(v any) []byte {
 
 var errBoom = errors.New("boom")
 
+// configureGuild writes scalar settings for the fixture's guild through the
+// store so its in-memory cache stays consistent.
+func configureGuild(fx *botFixture, enabled bool, starboard, emote string) {
+	patch := store.GuildPatch{
+		Enabled:          &enabled,
+		StarboardChannel: &starboard,
+		StarEmote:        &emote,
+	}
+	Expect(fx.b.Store.Guilds.Update(context.Background(), "guild1", patch)).To(Succeed())
+}
+
 var _ = Describe("MessageCreate handler", func() {
 	var fx *botFixture
 
@@ -28,9 +41,9 @@ var _ = Describe("MessageCreate handler", func() {
 	})
 
 	It("ignores messages from bots", func() {
-		var requests int32
+		var requests atomic.Int32
 		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			return jsonMarshal(&discordgo.Message{ID: "resp"}), 200
 		})
 
@@ -44,13 +57,13 @@ var _ = Describe("MessageCreate handler", func() {
 			},
 		})
 
-		Expect(atomic.LoadInt32(&requests)).To(BeZero(), "bot messages should be ignored")
+		Expect(requests.Load()).To(BeZero(), "bot messages should be ignored")
 	})
 
 	It("returns early when prefix does not match", func() {
-		var requests int32
+		var requests atomic.Int32
 		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			return jsonMarshal(&discordgo.Message{ID: "resp"}), 200
 		})
 
@@ -64,7 +77,7 @@ var _ = Describe("MessageCreate handler", func() {
 			},
 		})
 
-		Expect(atomic.LoadInt32(&requests)).To(BeZero(), "messages without prefix should be ignored")
+		Expect(requests.Load()).To(BeZero(), "messages without prefix should be ignored")
 	})
 
 	It("executes a matching command via prefix", func() {
@@ -89,10 +102,10 @@ var _ = Describe("MessageCreate handler", func() {
 	})
 
 	It("rejects GuildOnly commands in DMs", func() {
-		var requests int32
+		var requests atomic.Int32
 		var postPath string
 		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			if req.Method == http.MethodPost {
 				postPath = req.URL.Path
 			}
@@ -109,19 +122,19 @@ var _ = Describe("MessageCreate handler", func() {
 			},
 		})
 
-		Eventually(func() int32 { return atomic.LoadInt32(&requests) }).Should(BeNumerically(">=", 1))
+		Eventually(func() int32 { return requests.Load() }).Should(BeNumerically(">=", 1))
 		Expect(postPath).To(ContainSubstring("/channels/chan1/messages"), "should send error message to channel")
 	})
 
 	It("sends error message when command exec fails", func() {
 		fx.addTestGuild("guild1", "Test Guild")
-		var requests int32
+		var requests atomic.Int32
 		fx.b.Registry.Groups()[0].Commands["ping"].Exec = func(s *discordgo.Session, m *discordgo.MessageCreate, args []string) error {
 			return errBoom
 		}
 
 		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			return jsonMarshal(&discordgo.Message{ID: "resp"}), 200
 		})
 
@@ -135,7 +148,7 @@ var _ = Describe("MessageCreate handler", func() {
 			},
 		})
 
-		Eventually(func() int32 { return atomic.LoadInt32(&requests) }).Should(BeNumerically(">=", 1))
+		Eventually(func() int32 { return requests.Load() }).Should(BeNumerically(">=", 1))
 	})
 })
 
@@ -148,9 +161,9 @@ var _ = Describe("MessageReactionAdd handler", func() {
 	})
 
 	It("returns early when guild is not in cache", func() {
-		var requests int32
+		var requests atomic.Int32
 		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			return jsonMarshal(&discordgo.Message{ID: "msg1"}), 200
 		})
 
@@ -161,15 +174,15 @@ var _ = Describe("MessageReactionAdd handler", func() {
 			},
 		})
 
-		Expect(atomic.LoadInt32(&requests)).To(BeZero(), "no message fetch should happen for uncached guild")
+		Expect(requests.Load()).To(BeZero(), "no message fetch should happen for uncached guild")
 	})
 
 	It("returns early when guild is disabled", func() {
-		fx.b.Store.Guilds.Cache().Get("guild1").Enabled = false
+		configureGuild(fx, false, "", "")
 
-		var requests int32
+		var requests atomic.Int32
 		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			return jsonMarshal(&discordgo.Message{ID: "msg1"}), 200
 		})
 
@@ -180,13 +193,13 @@ var _ = Describe("MessageReactionAdd handler", func() {
 			},
 		})
 
-		Expect(atomic.LoadInt32(&requests)).To(BeZero())
+		Expect(requests.Load()).To(BeZero())
 	})
 
 	It("returns early when starboard channel is empty", func() {
-		var requests int32
+		var requests atomic.Int32
 		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			return jsonMarshal(&discordgo.Message{ID: "msg1"}), 200
 		})
 
@@ -197,18 +210,15 @@ var _ = Describe("MessageReactionAdd handler", func() {
 			},
 		})
 
-		Expect(atomic.LoadInt32(&requests)).To(BeZero())
+		Expect(requests.Load()).To(BeZero())
 	})
 
 	It("returns early when emoji does not match", func() {
-		g := fx.b.Store.Guilds.Cache().Get("guild1")
-		g.Enabled = true
-		g.StarboardChannel = "starboard1"
-		g.StarEmote = "\u2b50"
+		configureGuild(fx, true, "starboard1", "\u2b50")
 
-		var requests int32
+		var requests atomic.Int32
 		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			return jsonMarshal(&discordgo.Message{ID: "msg1"}), 200
 		})
 
@@ -219,19 +229,16 @@ var _ = Describe("MessageReactionAdd handler", func() {
 			},
 		})
 
-		Expect(atomic.LoadInt32(&requests)).To(BeZero())
+		Expect(requests.Load()).To(BeZero())
 	})
 
 	It("returns early when channel is banned", func() {
-		g := fx.b.Store.Guilds.Cache().Get("guild1")
-		g.Enabled = true
-		g.StarboardChannel = "starboard1"
-		g.StarEmote = "\u2b50"
-		g.BannedChannels = []string{"bannedchan"}
+		configureGuild(fx, true, "starboard1", "\u2b50")
+		Expect(fx.b.Store.Guilds.BanChannel(context.Background(), "guild1", "bannedchan")).To(Succeed())
 
-		var requests int32
+		var requests atomic.Int32
 		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			return jsonMarshal(&discordgo.Message{ID: "msg1"}), 200
 		})
 
@@ -242,18 +249,15 @@ var _ = Describe("MessageReactionAdd handler", func() {
 			},
 		})
 
-		Expect(atomic.LoadInt32(&requests)).To(BeZero())
+		Expect(requests.Load()).To(BeZero())
 	})
 
 	It("fetches the message when all checks pass", func() {
-		g := fx.b.Store.Guilds.Cache().Get("guild1")
-		g.Enabled = true
-		g.StarboardChannel = "starboard1"
-		g.StarEmote = "\u2b50"
+		configureGuild(fx, true, "starboard1", "\u2b50")
 
-		var requests int32
+		var requests atomic.Int32
 		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			if req.Method == http.MethodGet {
 				// Return a message with no matching star reaction so the
 				// handler returns at findReaction without calling Starboarder.
@@ -273,7 +277,7 @@ var _ = Describe("MessageReactionAdd handler", func() {
 			},
 		})
 
-		Expect(atomic.LoadInt32(&requests)).To(BeNumerically(">=", 1), "message should be fetched when all checks pass")
+		Expect(requests.Load()).To(BeNumerically(">=", 1), "message should be fetched when all checks pass")
 	})
 })
 
@@ -286,9 +290,9 @@ var _ = Describe("MessageReactionRemove handler", func() {
 	})
 
 	It("returns early when guild is not in cache", func() {
-		var requests int32
+		var requests atomic.Int32
 		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			return jsonMarshal(&discordgo.Message{ID: "msg1"}), 200
 		})
 
@@ -299,15 +303,15 @@ var _ = Describe("MessageReactionRemove handler", func() {
 			},
 		})
 
-		Expect(atomic.LoadInt32(&requests)).To(BeZero())
+		Expect(requests.Load()).To(BeZero())
 	})
 
 	It("returns early when guild is disabled", func() {
-		fx.b.Store.Guilds.Cache().Get("guild1").Enabled = false
+		configureGuild(fx, false, "", "")
 
-		var requests int32
+		var requests atomic.Int32
 		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			return jsonMarshal(&discordgo.Message{ID: "msg1"}), 200
 		})
 
@@ -318,18 +322,15 @@ var _ = Describe("MessageReactionRemove handler", func() {
 			},
 		})
 
-		Expect(atomic.LoadInt32(&requests)).To(BeZero())
+		Expect(requests.Load()).To(BeZero())
 	})
 
 	It("returns early when emoji does not match", func() {
-		g := fx.b.Store.Guilds.Cache().Get("guild1")
-		g.Enabled = true
-		g.StarboardChannel = "starboard1"
-		g.StarEmote = "\u2b50"
+		configureGuild(fx, true, "starboard1", "\u2b50")
 
-		var requests int32
+		var requests atomic.Int32
 		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			return jsonMarshal(&discordgo.Message{ID: "msg1"}), 200
 		})
 
@@ -340,7 +341,7 @@ var _ = Describe("MessageReactionRemove handler", func() {
 			},
 		})
 
-		Expect(atomic.LoadInt32(&requests)).To(BeZero())
+		Expect(requests.Load()).To(BeZero())
 	})
 })
 
@@ -353,9 +354,9 @@ var _ = Describe("MessageReactionRemoveAll handler", func() {
 	})
 
 	It("returns early when guild is not in cache", func() {
-		var requests int32
+		var requests atomic.Int32
 		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			return jsonMarshal(&discordgo.Message{ID: "msg1"}), 200
 		})
 
@@ -365,17 +366,15 @@ var _ = Describe("MessageReactionRemoveAll handler", func() {
 			},
 		})
 
-		Expect(atomic.LoadInt32(&requests)).To(BeZero())
+		Expect(requests.Load()).To(BeZero())
 	})
 
 	It("does not call Starboarder when guild is disabled", func() {
-		g := fx.b.Store.Guilds.Cache().Get("guild1")
-		g.Enabled = false
-		g.StarboardChannel = "starboard1"
+		configureGuild(fx, false, "starboard1", "")
 
-		var requests int32
+		var requests atomic.Int32
 		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			return jsonMarshal(&discordgo.Message{
 				ID:     "msg1",
 				Author: &discordgo.User{ID: "author1"},
@@ -388,17 +387,15 @@ var _ = Describe("MessageReactionRemoveAll handler", func() {
 			},
 		})
 
-		Eventually(func() int32 { return atomic.LoadInt32(&requests) }).Should(BeNumerically(">=", 1), "message should be fetched")
+		Eventually(func() int32 { return requests.Load() }).Should(BeNumerically(">=", 1), "message should be fetched")
 	})
 
 	It("does not call Starboarder when starboard channel is empty", func() {
-		g := fx.b.Store.Guilds.Cache().Get("guild1")
-		g.Enabled = true
-		g.StarboardChannel = ""
+		configureGuild(fx, true, "", "")
 
-		var requests int32
+		var requests atomic.Int32
 		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			return jsonMarshal(&discordgo.Message{
 				ID:     "msg1",
 				Author: &discordgo.User{ID: "author1"},
@@ -411,17 +408,15 @@ var _ = Describe("MessageReactionRemoveAll handler", func() {
 			},
 		})
 
-		Eventually(func() int32 { return atomic.LoadInt32(&requests) }).Should(BeNumerically(">=", 1), "message should be fetched")
+		Eventually(func() int32 { return requests.Load() }).Should(BeNumerically(">=", 1), "message should be fetched")
 	})
 
 	It("does not call Starboarder when message author is the bot", func() {
-		g := fx.b.Store.Guilds.Cache().Get("guild1")
-		g.Enabled = true
-		g.StarboardChannel = "starboard1"
+		configureGuild(fx, true, "starboard1", "")
 
-		var requests int32
+		var requests atomic.Int32
 		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			return jsonMarshal(&discordgo.Message{
 				ID:     "msg1",
 				Author: &discordgo.User{ID: "123456789"}, // bot's own ID
@@ -434,13 +429,8 @@ var _ = Describe("MessageReactionRemoveAll handler", func() {
 			},
 		})
 
-		Eventually(func() int32 { return atomic.LoadInt32(&requests) }).Should(BeNumerically(">=", 1))
+		Eventually(func() int32 { return requests.Load() }).Should(BeNumerically(">=", 1))
 	})
-
-	// Note: The "all checks pass" path calls b.Starboard.ReactionsCleared()
-	// which processes events asynchronously via a goroutine that calls
-	// store.Messages.Repost(). With a real MongoDB instance from
-	// testcontainers, the Starboarder processing can be fully exercised.
 })
 
 var _ = Describe("MessageDelete handler", func() {
@@ -452,9 +442,9 @@ var _ = Describe("MessageDelete handler", func() {
 	})
 
 	It("returns early when guild is not in cache", func() {
-		var requests int32
+		var requests atomic.Int32
 		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			return jsonMarshal(&discordgo.Message{ID: "msg1"}), 200
 		})
 
@@ -464,15 +454,15 @@ var _ = Describe("MessageDelete handler", func() {
 			},
 		})
 
-		Expect(atomic.LoadInt32(&requests)).To(BeZero(), "no API calls for uncached guild")
+		Expect(requests.Load()).To(BeZero(), "no API calls for uncached guild")
 	})
 
 	It("returns early when guild is disabled", func() {
-		fx.b.Store.Guilds.Cache().Get("guild1").Enabled = false
+		configureGuild(fx, false, "", "")
 
-		var requests int32
+		var requests atomic.Int32
 		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			return jsonMarshal(&discordgo.Message{ID: "msg1"}), 200
 		})
 
@@ -482,13 +472,13 @@ var _ = Describe("MessageDelete handler", func() {
 			},
 		})
 
-		Expect(atomic.LoadInt32(&requests)).To(BeZero())
+		Expect(requests.Load()).To(BeZero())
 	})
 
 	It("returns early when starboard channel is empty", func() {
-		var requests int32
+		var requests atomic.Int32
 		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			return jsonMarshal(&discordgo.Message{ID: "msg1"}), 200
 		})
 
@@ -498,18 +488,16 @@ var _ = Describe("MessageDelete handler", func() {
 			},
 		})
 
-		Expect(atomic.LoadInt32(&requests)).To(BeZero())
+		Expect(requests.Load()).To(BeZero())
 	})
 
 	It("returns early when channel is banned", func() {
-		g := fx.b.Store.Guilds.Cache().Get("guild1")
-		g.Enabled = true
-		g.StarboardChannel = "starboard1"
-		g.BannedChannels = []string{"chan1"}
+		configureGuild(fx, true, "starboard1", "")
+		Expect(fx.b.Store.Guilds.BanChannel(context.Background(), "guild1", "chan1")).To(Succeed())
 
-		var requests int32
+		var requests atomic.Int32
 		fx.sess.On("/channels/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			return jsonMarshal(&discordgo.Message{ID: "msg1"}), 200
 		})
 
@@ -519,7 +507,7 @@ var _ = Describe("MessageDelete handler", func() {
 			},
 		})
 
-		Expect(atomic.LoadInt32(&requests)).To(BeZero())
+		Expect(requests.Load()).To(BeZero())
 	})
 })
 
@@ -532,9 +520,9 @@ var _ = Describe("GuildCreate handler", func() {
 
 	It("does nothing when guild already in cache", func() {
 		fx.addTestGuild("guild1", "Test Guild")
-		var requests int32
+		var requests atomic.Int32
 		fx.sess.On("/guilds/", func(req *http.Request) ([]byte, int) {
-			atomic.AddInt32(&requests, 1)
+			requests.Add(1)
 			return jsonMarshal(&discordgo.Guild{ID: "guild1"}), 200
 		})
 
@@ -542,7 +530,7 @@ var _ = Describe("GuildCreate handler", func() {
 			Guild: &discordgo.Guild{ID: "guild1", Name: "Test Guild"},
 		})
 
-		Expect(atomic.LoadInt32(&requests)).To(BeZero(), "no DB writes for cached guild")
+		Expect(requests.Load()).To(BeZero(), "no DB writes for cached guild")
 	})
 })
 

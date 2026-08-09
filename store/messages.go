@@ -14,7 +14,7 @@ import (
 
 const (
 	messagesCollection = "messages"
-	MessageCacheTTL    = 10 * time.Hour
+	messageCacheTTL    = 10 * time.Hour
 )
 
 type MessagePair struct {
@@ -42,16 +42,16 @@ func NewPair(channelID, messageID string) MessagePair {
 	return MessagePair{ChannelID: channelID, MessageID: messageID}
 }
 
-// Messages wraps the messages collection with an in-memory cache.
+// Messages wraps the messages collection with an internal TTL-backed cache.
 type Messages struct {
 	col   *mongo.Collection
 	cache *messageCache
 }
 
-func NewMessages(db *mongo.Database) *Messages {
+func newMessages(db *mongo.Database) *Messages {
 	m := &Messages{
 		col:   db.Collection(messagesCollection),
-		cache: newMessageCache(MessageCacheTTL),
+		cache: newMessageCache(messageCacheTTL),
 	}
 	m.cache.start()
 	return m
@@ -123,8 +123,8 @@ func (c *messageCache) evictExpired() {
 	c.mu.Unlock()
 }
 
-// Insert persists a single message record.
-func (m *Messages) Insert(ctx context.Context, msg *Message) error {
+// Create persists a single starboard record.
+func (m *Messages) Create(ctx context.Context, msg *Message) error {
 	if _, err := m.col.InsertOne(ctx, msg); err != nil {
 		return fmt.Errorf("store: inserting message (%s/%s): %w", msg.Original.ChannelID, msg.Original.MessageID, err)
 	}
@@ -132,6 +132,7 @@ func (m *Messages) Insert(ctx context.Context, msg *Message) error {
 	return nil
 }
 
+// Delete removes the starboard record for an original message pair.
 func (m *Messages) Delete(ctx context.Context, pair *MessagePair) error {
 	filter := bson.D{
 		{Key: "original.channel_id", Value: pair.ChannelID},
@@ -144,8 +145,9 @@ func (m *Messages) Delete(ctx context.Context, pair *MessagePair) error {
 	return nil
 }
 
-// Repost returns the starboard record for an original message.
-func (m *Messages) Repost(ctx context.Context, channelID, id string) (*Message, error) {
+// GetByOriginal returns the starboard record pairing for an original message.
+// A nil record means no pairing exists.
+func (m *Messages) GetByOriginal(ctx context.Context, channelID, id string) (*Message, error) {
 	pair := NewPair(channelID, id)
 
 	if msg, ok := m.cache.get(pair); ok {
@@ -161,14 +163,15 @@ func (m *Messages) Repost(ctx context.Context, channelID, id string) (*Message, 
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("store: finding repost (%s/%s): %w", channelID, id, err)
+		return nil, fmt.Errorf("store: finding starboard record (%s/%s): %w", channelID, id, err)
 	}
 	m.cache.set(pair, *msg)
 	return msg, nil
 }
 
-// RepostByStarboard returns the starboard record for a starboard message.
-func (m *Messages) RepostByStarboard(ctx context.Context, channelID, id string) (*Message, error) {
+// GetByStarboard returns the starboard record pairing for a starboard message.
+// A nil record means the message is not a starboard post.
+func (m *Messages) GetByStarboard(ctx context.Context, channelID, id string) (*Message, error) {
 	msg := &Message{}
 	err := m.col.FindOne(ctx, bson.D{
 		{Key: "starboard.channel_id", Value: channelID},
@@ -178,12 +181,13 @@ func (m *Messages) RepostByStarboard(ctx context.Context, channelID, id string) 
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("store: finding repost by starboard (%s/%s): %w", channelID, id, err)
+		return nil, fmt.Errorf("store: finding record by starboard (%s/%s): %w", channelID, id, err)
 	}
 	return msg, nil
 }
 
-func (m *Messages) CreateIndex(ctx context.Context) error {
+// createIndex creates the messages unique index.
+func (m *Messages) createIndex(ctx context.Context) error {
 	_, err := m.col.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "original.channel_id", Value: 1},

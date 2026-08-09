@@ -108,10 +108,9 @@ func jsonMarshal(v any) []byte {
 	return b
 }
 
-// addTestGuildCache adds a guild to the store cache and the State cache.
 func (f *cmdFixture) addTestGuild(guildID, name string) *store.Guild {
 	g := store.NewGuild(name, guildID)
-	f.b.Store.Guilds.Cache().CacheSet(g)
+	Expect(f.b.Store.Guilds.Create(context.Background(), g)).To(Succeed())
 
 	dg := &discordgo.Guild{
 		ID:      guildID,
@@ -125,7 +124,6 @@ func (f *cmdFixture) addTestGuild(guildID, name string) *store.Guild {
 	return g
 }
 
-// addTestMember adds a member to the state cache.
 func (f *cmdFixture) addTestMember(guildID, userID string) {
 	m := &discordgo.Member{
 		GuildID: guildID,

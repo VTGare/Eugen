@@ -39,7 +39,7 @@ func help(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []strin
 
 // defaultPrefix returns the guild's custom prefix if set, otherwise "e!".
 func defaultPrefix(b *bot.Bot, guildID string) string {
-	guild := b.Store.Guilds.Cache().Get(guildID)
+	guild := b.Store.Guilds.Get(b.Context(), guildID)
 	if guild != nil && guild.Prefix != "" {
 		return guild.Prefix
 	}

@@ -33,7 +33,7 @@ func ban(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string
 			return ErrNotEnoughArguments
 		}
 
-		guild := b.Store.Guilds.Cache().Get(m.GuildID)
+		guild := b.Store.Guilds.Get(context.Background(), m.GuildID)
 
 		banned := make([]string, 0)
 		for _, arg := range args {
@@ -84,7 +84,7 @@ func unban(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []stri
 			return ErrNotEnoughArguments
 		}
 
-		guild := b.Store.Guilds.Cache().Get(m.GuildID)
+		guild := b.Store.Guilds.Get(context.Background(), m.GuildID)
 		unbanned := make([]string, 0)
 		for _, arg := range args {
 			arg = strings.Trim(arg, "<#>")
@@ -127,7 +127,7 @@ func blacklist(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []
 			return ErrNotEnoughArguments
 		}
 
-		guild := b.Store.Guilds.Cache().Get(m.GuildID)
+		guild := b.Store.Guilds.Get(context.Background(), m.GuildID)
 		blacklisted := make([]string, 0)
 		for _, arg := range args {
 			arg = strings.Trim(arg, "<@!>")
@@ -169,7 +169,7 @@ func unblacklist(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, 
 			return ErrNotEnoughArguments
 		}
 
-		guild := b.Store.Guilds.Cache().Get(m.GuildID)
+		guild := b.Store.Guilds.Get(context.Background(), m.GuildID)
 		unblacklisted := make([]string, 0)
 		for _, arg := range args {
 			arg = strings.Trim(arg, "<@!>")
@@ -208,7 +208,7 @@ func req(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string
 			return ErrNotEnoughArguments
 		}
 
-		g := b.Store.Guilds.Cache().Get(m.GuildID)
+		g := b.Store.Guilds.Get(context.Background(), m.GuildID)
 
 		channelID := strings.Trim(args[0], "<#>")
 
@@ -263,7 +263,7 @@ var guildSetters = map[string]guildSetter{
 			return "", fmt.Errorf("unable to parse %q to a boolean", raw)
 		}
 
-		return strconv.FormatBool(v), gs.SetEnabled(ctx, m.GuildID, v)
+		return strconv.FormatBool(v), gs.Update(ctx, m.GuildID, store.GuildPatch{Enabled: &v})
 	},
 	"selfstar": func(ctx context.Context, gs *store.Guilds, _ *discordgo.Session, m *discordgo.MessageCreate, raw string) (string, error) {
 		v, err := strconv.ParseBool(raw)
@@ -271,7 +271,7 @@ var guildSetters = map[string]guildSetter{
 			return "", fmt.Errorf("unable to parse %q to a boolean", raw)
 		}
 
-		return strconv.FormatBool(v), gs.SetSelfstar(ctx, m.GuildID, v)
+		return strconv.FormatBool(v), gs.Update(ctx, m.GuildID, store.GuildPatch{Selfstar: &v})
 	},
 	"ignorebots": func(ctx context.Context, gs *store.Guilds, _ *discordgo.Session, m *discordgo.MessageCreate, raw string) (string, error) {
 		v, err := strconv.ParseBool(raw)
@@ -279,7 +279,7 @@ var guildSetters = map[string]guildSetter{
 			return "", fmt.Errorf("unable to parse %q to a boolean", raw)
 		}
 
-		return strconv.FormatBool(v), gs.SetIgnoreBots(ctx, m.GuildID, v)
+		return strconv.FormatBool(v), gs.Update(ctx, m.GuildID, store.GuildPatch{IgnoreBots: &v})
 	},
 	"color": func(ctx context.Context, gs *store.Guilds, _ *discordgo.Session, m *discordgo.MessageCreate, raw string) (string, error) {
 		v, ok := parseColor(raw)
@@ -287,7 +287,7 @@ var guildSetters = map[string]guildSetter{
 			return "", fmt.Errorf("unable to parse %q to a valid color", raw)
 		}
 
-		return strconv.FormatInt(v, 10), gs.SetEmbedColor(ctx, m.GuildID, v)
+		return strconv.FormatInt(v, 10), gs.Update(ctx, m.GuildID, store.GuildPatch{EmbedColor: &v})
 	},
 	"prefix": func(ctx context.Context, gs *store.Guilds, _ *discordgo.Session, m *discordgo.MessageCreate, raw string) (string, error) {
 		v := raw
@@ -295,7 +295,7 @@ var guildSetters = map[string]guildSetter{
 			v += " "
 		}
 
-		return v, gs.SetPrefix(ctx, m.GuildID, v)
+		return v, gs.Update(ctx, m.GuildID, store.GuildPatch{Prefix: &v})
 	},
 	"emote": func(ctx context.Context, gs *store.Guilds, s *discordgo.Session, m *discordgo.MessageCreate, raw string) (string, error) {
 		v, err := getEmoji(s, m.GuildID, raw)
@@ -303,7 +303,7 @@ var guildSetters = map[string]guildSetter{
 			return "", errors.New("argument's either a global emoji or not one at all")
 		}
 
-		return v, gs.SetStarEmote(ctx, m.GuildID, v)
+		return v, gs.Update(ctx, m.GuildID, store.GuildPatch{StarEmote: &v})
 	},
 	"starboard": func(ctx context.Context, gs *store.Guilds, s *discordgo.Session, m *discordgo.MessageCreate, raw string) (string, error) {
 		v := raw
@@ -321,7 +321,7 @@ var guildSetters = map[string]guildSetter{
 			return "", errors.New("can't assign starboard to a channel from a foreign server")
 		}
 
-		return "<#" + v + ">", gs.SetStarboardChannel(ctx, m.GuildID, v)
+		return "<#" + v + ">", gs.Update(ctx, m.GuildID, store.GuildPatch{StarboardChannel: &v})
 	},
 	"stars": func(ctx context.Context, gs *store.Guilds, _ *discordgo.Session, m *discordgo.MessageCreate, raw string) (string, error) {
 		stars, err := strconv.Atoi(raw)
@@ -329,7 +329,7 @@ var guildSetters = map[string]guildSetter{
 			return "", fmt.Errorf("unable to parse %q to an integer", raw)
 		}
 
-		return raw, gs.SetMinimumStars(ctx, m.GuildID, stars)
+		return raw, gs.Update(ctx, m.GuildID, store.GuildPatch{MinimumStars: &stars})
 	},
 }
 
@@ -374,7 +374,7 @@ func set(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []string
 }
 
 func showGuildSettings(s *discordgo.Session, m *discordgo.MessageCreate, b *bot.Bot) {
-	settings := b.Store.Guilds.Cache().Get(m.GuildID)
+	settings := b.Store.Guilds.Get(b.Context(), m.GuildID)
 	guild, _ := s.Guild(settings.ID)
 
 	bannedChannels := lo.Map(settings.BannedChannels, func(s string, _ int) string {
@@ -462,7 +462,6 @@ func setup(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []stri
 		}
 
 		var (
-			guild     = b.Store.Guilds.Cache().Get(m.GuildID)
 			step      = 0
 			done      = false
 			exit      = false
@@ -657,15 +656,16 @@ func setup(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageCreate, []stri
 			Timestamp(time.Now())
 
 		if !exit {
-			guild.Enabled = true
-			guild.StarboardChannel = strings.TrimSuffix(strings.TrimPrefix(starboard, "<#"), ">")
-			guild.MinimumStars = minstars
-			guild.StarEmote = emote
-			guild.Selfstar = selfstar
-			guild.EmbedColor = color
-			guild.UpdatedAt = time.Now()
+			patch := store.GuildPatch{
+				Enabled:          lo.ToPtr(true),
+				StarboardChannel: lo.ToPtr(strings.TrimSuffix(strings.TrimPrefix(starboard, "<#"), ">")),
+				MinimumStars:     &minstars,
+				StarEmote:        &emote,
+				Selfstar:         &selfstar,
+				EmbedColor:       &color,
+			}
 
-			err = b.Store.Guilds.Replace(context.Background(), guild)
+			err = b.Store.Guilds.Update(b.Context(), m.GuildID, patch)
 			if err != nil {
 				eb = eb.FailureTemplate(fmt.Sprintf("Error occurred while saving settings.\n\n%v", err))
 			} else {

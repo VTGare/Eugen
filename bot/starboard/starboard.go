@@ -141,7 +141,7 @@ func effectiveCount(react *discordgo.MessageReactions, selfStar bool, guild *sto
 }
 
 func (s *Starboarder) handleReactionAdd(ctx context.Context, e Event, l *slog.Logger) error {
-	guild := s.store.Guilds.Cache().Get(e.GuildID)
+	guild := s.store.Guilds.Get(ctx, e.GuildID)
 	if guild == nil || !guild.Enabled || guild.StarboardChannel == "" {
 		return nil
 	}
@@ -154,7 +154,7 @@ func (s *Starboarder) handleReactionAdd(ctx context.Context, e Event, l *slog.Lo
 		return nil
 	}
 
-	board, err := s.store.Messages.Repost(ctx, e.ChannelID, e.MessageID)
+	board, err := s.store.Messages.GetByOriginal(ctx, e.ChannelID, e.MessageID)
 	if err != nil {
 		return fmt.Errorf("fetching repost: %w", err)
 	}
@@ -172,14 +172,14 @@ func (s *Starboarder) handleReactionAdd(ctx context.Context, e Event, l *slog.Lo
 }
 
 func (s *Starboarder) handleReactionRemove(ctx context.Context, e Event, l *slog.Logger) error {
-	guild := s.store.Guilds.Cache().Get(e.GuildID)
+	guild := s.store.Guilds.Get(ctx, e.GuildID)
 	if guild == nil || !guild.Enabled || guild.StarboardChannel == "" {
 		return nil
 	}
 
 	react := e.React
 
-	board, err := s.store.Messages.Repost(ctx, e.ChannelID, e.MessageID)
+	board, err := s.store.Messages.GetByOriginal(ctx, e.ChannelID, e.MessageID)
 	if err != nil {
 		return fmt.Errorf("fetching repost: %w", err)
 	}
@@ -203,19 +203,19 @@ func (s *Starboarder) handleReactionRemove(ctx context.Context, e Event, l *slog
 }
 
 func (s *Starboarder) handleMessageDelete(ctx context.Context, e Event, l *slog.Logger) error {
-	guild := s.store.Guilds.Cache().Get(e.GuildID)
+	guild := s.store.Guilds.Get(ctx, e.GuildID)
 	if guild == nil || !guild.Enabled || guild.StarboardChannel == "" {
 		return nil
 	}
 
 	// Could be either the original or the starboard message that was deleted.
-	board, err := s.store.Messages.Repost(ctx, e.DeletedChannel, e.DeletedMessage)
+	board, err := s.store.Messages.GetByOriginal(ctx, e.DeletedChannel, e.DeletedMessage)
 	if err != nil {
 		return fmt.Errorf("fetching repost: %w", err)
 	}
 
 	if board == nil {
-		board, err = s.store.Messages.RepostByStarboard(ctx, e.DeletedChannel, e.DeletedMessage)
+		board, err = s.store.Messages.GetByStarboard(ctx, e.DeletedChannel, e.DeletedMessage)
 		if err != nil {
 			return fmt.Errorf("fetching repost by starboard: %w", err)
 		}
@@ -229,12 +229,12 @@ func (s *Starboarder) handleMessageDelete(ctx context.Context, e Event, l *slog.
 }
 
 func (s *Starboarder) handleReactionsClear(ctx context.Context, e Event, l *slog.Logger) error {
-	guild := s.store.Guilds.Cache().Get(e.GuildID)
+	guild := s.store.Guilds.Get(ctx, e.GuildID)
 	if guild == nil || !guild.Enabled || guild.StarboardChannel == "" {
 		return nil
 	}
 
-	board, err := s.store.Messages.Repost(ctx, e.ChannelID, e.MessageID)
+	board, err := s.store.Messages.GetByOriginal(ctx, e.ChannelID, e.MessageID)
 	if err != nil {
 		return fmt.Errorf("fetching repost: %w", err)
 	}
@@ -275,7 +275,7 @@ func (s *Starboarder) createStarboard(ctx context.Context, e Event, guild *store
 
 	oPair := store.NewPair(original.ChannelID, original.ID)
 	sPair := store.NewPair(starboard.ChannelID, starboard.ID)
-	if err := s.store.Messages.Insert(ctx, store.NewMessage(&oPair, &sPair, guild.ID)); err != nil {
+	if err := s.store.Messages.Create(ctx, store.NewMessage(&oPair, &sPair, guild.ID)); err != nil {
 		l.Warn("inserting starboard record", "err", err)
 	}
 

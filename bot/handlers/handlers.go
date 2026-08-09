@@ -66,7 +66,7 @@ func commandMatch(cmd *registry.Command, name string) bool {
 // MessageReactionAdd returns a handler for the discordgo.MessageReactionAdd event.
 func MessageReactionAdd(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageReactionAdd) {
 	return func(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
-		guild := b.Store.Guilds.Cache().Get(r.GuildID)
+		guild := b.Store.Guilds.Get(b.Context(), r.GuildID)
 		if guild == nil || !guild.Enabled || guild.StarboardChannel == "" {
 			return
 		}
@@ -120,7 +120,7 @@ func MessageReactionAdd(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageR
 // MessageReactionRemove returns a handler for the discordgo.MessageReactionRemove event.
 func MessageReactionRemove(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageReactionRemove) {
 	return func(s *discordgo.Session, r *discordgo.MessageReactionRemove) {
-		guild := b.Store.Guilds.Cache().Get(r.GuildID)
+		guild := b.Store.Guilds.Get(b.Context(), r.GuildID)
 		if guild == nil || !guild.Enabled || guild.StarboardChannel == "" {
 			return
 		}
@@ -170,7 +170,7 @@ func MessageReactionRemove(b *bot.Bot) func(*discordgo.Session, *discordgo.Messa
 // MessageReactionRemoveAll returns a handler for the discordgo.MessageReactionRemoveAll event.
 func MessageReactionRemoveAll(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageReactionRemoveAll) {
 	return func(s *discordgo.Session, r *discordgo.MessageReactionRemoveAll) {
-		guild := b.Store.Guilds.Cache().Get(r.GuildID)
+		guild := b.Store.Guilds.Get(b.Context(), r.GuildID)
 		if guild == nil {
 			return
 		}
@@ -196,7 +196,7 @@ func MessageReactionRemoveAll(b *bot.Bot) func(*discordgo.Session, *discordgo.Me
 // MessageDelete returns a handler for the discordgo.MessageDelete event.
 func MessageDelete(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageDelete) {
 	return func(s *discordgo.Session, m *discordgo.MessageDelete) {
-		guild := b.Store.Guilds.Cache().Get(m.GuildID)
+		guild := b.Store.Guilds.Get(b.Context(), m.GuildID)
 		if guild == nil {
 			return
 		}
@@ -216,17 +216,15 @@ func MessageDelete(b *bot.Bot) func(*discordgo.Session, *discordgo.MessageDelete
 // GuildCreate returns a handler for the discordgo.GuildCreate event.
 func GuildCreate(b *bot.Bot) func(*discordgo.Session, *discordgo.GuildCreate) {
 	return func(s *discordgo.Session, g *discordgo.GuildCreate) {
-		cache := b.Store.Guilds.Cache()
-		if cache.Get(g.ID) != nil {
+		if b.Store.Guilds.Get(b.Context(), g.ID) != nil {
 			return
 		}
 
 		newGuild := store.NewGuild(g.Name, g.ID)
-		if err := b.Store.Guilds.Insert(b.Context(), newGuild); err != nil {
+		if err := b.Store.Guilds.Create(b.Context(), newGuild); err != nil {
 			b.Logger().Warn("inserting guild", "err", err, "guild_id", g.ID)
 		}
 
-		cache.CacheSet(newGuild)
 		b.Logger().Info("joined guild", "guild_id", g.ID, "guild_name", g.Name)
 	}
 }

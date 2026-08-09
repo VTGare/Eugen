@@ -62,11 +62,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create database indexes.
-	if err := b.CreateIndexes(); err != nil {
-		log.Warn("creating indexes", "err", err)
-	}
-
 	// Seed guild cache from database.
 	b.LoadGuildCache()
 

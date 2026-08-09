@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -20,7 +19,7 @@ type Config struct {
 
 type Store struct {
 	client   *mongo.Client
-	Database *mongo.Database
+	database *mongo.Database
 	Guilds   *Guilds
 	Messages *Messages
 }
@@ -31,10 +30,6 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 	}
 
 	dbName := cfg.Database
-	if dbName == "" {
-		dbName = os.Getenv("EUG_DB_NAME")
-	}
-
 	if dbName == "" {
 		dbName = DefaultDatabaseName
 	}
@@ -59,12 +54,32 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 
 	db := client.Database(dbName)
 
-	return &Store{
+	st := &Store{
 		client:   client,
-		Database: db,
-		Guilds:   NewGuilds(db),
-		Messages: NewMessages(db),
-	}, nil
+		database: db,
+		Guilds:   newGuilds(db),
+		Messages: newMessages(db),
+	}
+
+	indexCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	if err := st.createIndexes(indexCtx); err != nil {
+		_ = client.Disconnect(context.Background())
+		return nil, err
+	}
+
+	return st, nil
+}
+
+func (s *Store) createIndexes(ctx context.Context) error {
+	if err := s.Guilds.createIndex(ctx); err != nil {
+		return err
+	}
+	if err := s.Messages.createIndex(ctx); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Store) Disconnect(ctx context.Context) error {
@@ -72,12 +87,4 @@ func (s *Store) Disconnect(ctx context.Context) error {
 		return nil
 	}
 	return s.client.Disconnect(ctx)
-}
-
-func (s *Store) Ping(ctx context.Context) error {
-	if s == nil || s.client == nil {
-		return fmt.Errorf("store: not connected")
-	}
-
-	return s.client.Ping(ctx, nil)
 }
