@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
 
@@ -130,27 +129,6 @@ func (m *Messages) Insert(ctx context.Context, msg *Message) error {
 		return fmt.Errorf("store: inserting message (%s/%s): %w", msg.Original.ChannelID, msg.Original.MessageID, err)
 	}
 	m.cache.set(*msg.Original, *msg)
-	return nil
-}
-
-// InsertMany persists a batch of message records.
-func (m *Messages) InsertMany(ctx context.Context, docs []any) error {
-	if len(docs) == 0 {
-		return nil
-	}
-	if _, err := m.col.InsertMany(ctx, docs); err != nil {
-		return fmt.Errorf("store: inserting %d messages: %w", len(docs), err)
-	}
-	for _, d := range docs {
-		switch msg := d.(type) {
-		case *Message:
-			m.cache.set(*msg.Original, *msg)
-		case Message:
-			m.cache.set(*msg.Original, msg)
-		default:
-			slog.Warn("skipping cache for non-message doc", "type", fmt.Sprintf("%T", d))
-		}
-	}
 	return nil
 }
 

@@ -117,7 +117,9 @@ func (g *Guild) ChannelSettingsToString() string {
 	if len(g.ChannelSettings) == 0 {
 		return "none"
 	}
+
 	fmt.Fprintf(&sb, "<#%v>``%v``: %v ", g.ChannelSettings[0].ID, g.ChannelSettings[0].ID, g.ChannelSettings[0].StarRequirement)
+
 	inRow := 1
 	if len(g.ChannelSettings) > 1 {
 		for _, ch := range g.ChannelSettings[1:] {
@@ -130,6 +132,7 @@ func (g *Guild) ChannelSettingsToString() string {
 			inRow++
 		}
 	}
+
 	return sb.String()
 }
 
@@ -152,6 +155,7 @@ func (g *Guild) BannedChannelsToString() string {
 			inRow++
 		}
 	}
+
 	return sb.String()
 }
 
