@@ -8,7 +8,6 @@ import (
 	"github.com/VTGare/Eugen/bot"
 	"github.com/VTGare/Eugen/bot/registry"
 	"github.com/VTGare/Eugen/bot/starboard"
-	"github.com/VTGare/Eugen/mock"
 	"github.com/VTGare/Eugen/store"
 	"github.com/VTGare/Eugen/testutil"
 	"github.com/bwmarrin/discordgo"
@@ -33,7 +32,7 @@ var _ = BeforeSuite(func() {
 
 type botFixture struct {
 	b    *bot.Bot
-	sess *mock.MockSession
+	sess *testutil.MockSession
 }
 
 func newBotFixture() *botFixture {
@@ -68,7 +67,7 @@ func newBotFixture() *botFixture {
 	}
 	b.Registry.Add("basic", g)
 
-	sess := mock.NewSession(GinkgoT())
+	sess := testutil.NewSession(GinkgoT())
 	sess.WithBotUser("123456789", "Eugen")
 	b.Session = sess.Session
 
