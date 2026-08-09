@@ -47,16 +47,22 @@ type Starboarder struct {
 	session *discordgo.Session
 	store   *store.Store
 	log     *slog.Logger
+	ctx     context.Context
 
 	mu     sync.Mutex
 	queues map[store.MessagePair]chan Event
 }
 
-func New(session *discordgo.Session, st *store.Store, logger *slog.Logger) *Starboarder {
+func New(ctx context.Context, session *discordgo.Session, st *store.Store, logger *slog.Logger) *Starboarder {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	return &Starboarder{
 		session: session,
 		store:   st,
 		log:     logger,
+		ctx:     ctx,
 		queues:  make(map[store.MessagePair]chan Event),
 	}
 }
@@ -108,17 +114,15 @@ func (s *Starboarder) ReactionsCleared(e Event) {
 }
 
 func (s *Starboarder) handle(e Event, l *slog.Logger) error {
-	ctx := context.Background()
-
 	switch e.Type {
 	case EventReactionAdd:
-		return s.handleReactionAdd(ctx, e, l)
+		return s.handleReactionAdd(s.ctx, e, l)
 	case EventReactionRemove:
-		return s.handleReactionRemove(ctx, e, l)
+		return s.handleReactionRemove(s.ctx, e, l)
 	case EventMessageDelete:
-		return s.handleMessageDelete(ctx, e, l)
+		return s.handleMessageDelete(s.ctx, e, l)
 	case EventReactionsClear:
-		return s.handleReactionsClear(ctx, e, l)
+		return s.handleReactionsClear(s.ctx, e, l)
 	default:
 		return nil
 	}

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"slices"
 	"strings"
 
@@ -223,7 +222,7 @@ func GuildCreate(b *bot.Bot) func(*discordgo.Session, *discordgo.GuildCreate) {
 		}
 
 		newGuild := store.NewGuild(g.Name, g.ID)
-		if err := b.Store.Guilds.Insert(context.Background(), newGuild); err != nil {
+		if err := b.Store.Guilds.Insert(b.Context(), newGuild); err != nil {
 			b.Logger().Warn("inserting guild", "err", err, "guild_id", g.ID)
 		}
 

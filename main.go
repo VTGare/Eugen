@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/VTGare/Eugen/bot"
 	"github.com/VTGare/Eugen/bot/commands"
@@ -16,6 +17,9 @@ import (
 )
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer stop()
+
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("loading config", "err", err)
@@ -25,9 +29,9 @@ func main() {
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	slog.SetDefault(log)
 
-	st := setupStore(cfg, log)
+	st := setupStore(ctx, cfg, log)
 
-	b := bot.New(st, bot.Config{
+	b := bot.New(ctx, st, bot.Config{
 		Prefixes: cfg.Bot.Prefixes,
 	}, log)
 
@@ -41,7 +45,7 @@ func main() {
 	}
 
 	// Create and inject the starboard engine after the session is ready.
-	b.SetStarboarder(starboard.New(b.Session, st, log))
+	b.SetStarboarder(starboard.New(ctx, b.Session, st, log))
 
 	// Register event handlers.
 	s := b.Session
@@ -57,28 +61,29 @@ func main() {
 		log.Error("opening connection", "err", err)
 		os.Exit(1)
 	}
-	defer s.Close()
 
 	// Create database indexes.
-	if err := b.CreateIndexes(context.Background()); err != nil {
+	if err := b.CreateIndexes(); err != nil {
 		log.Warn("creating indexes", "err", err)
 	}
 
 	// Seed guild cache from database.
 	b.LoadGuildCache()
 
-	// Wait for interrupt signal.
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-	<-sc
+	// Block until a shutdown signal cancels the app context.
+	<-ctx.Done()
+	log.Info("shutdown signal received, cleaning up")
 
-	if err := st.Disconnect(context.Background()); err != nil {
-		log.Warn("disconnecting from mongodb", "err", err)
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := b.Shutdown(cleanupCtx); err != nil {
+		log.Warn("cleaning up", "err", err)
 	}
 }
 
-func setupStore(cfg *config.Config, log *slog.Logger) *store.Store {
-	s, err := store.New(context.Background(), store.Config{
+func setupStore(ctx context.Context, cfg *config.Config, log *slog.Logger) *store.Store {
+	s, err := store.New(ctx, store.Config{
 		URI:            cfg.MongoDB.URI,
 		Database:       cfg.MongoDB.Database,
 		ConnectTimeout: cfg.MongoDB.ConnectTimeout,

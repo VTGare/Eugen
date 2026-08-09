@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"testing"
@@ -39,7 +40,7 @@ func newBotFixture() *botFixture {
 	st := mongoContainer.NewTestStore(GinkgoT())
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	b := bot.New(st, bot.Config{Prefixes: []string{"e!"}}, logger)
+	b := bot.New(context.Background(), st, bot.Config{Prefixes: []string{"e!"}}, logger)
 	b.SetMention("<@123456789>")
 
 	g := &registry.CommandGroup{
@@ -71,7 +72,7 @@ func newBotFixture() *botFixture {
 	sess.WithBotUser("123456789", "Eugen")
 	b.Session = sess.Session
 
-	sb := starboard.New(sess.Session, st, logger)
+	sb := starboard.New(context.Background(), sess.Session, st, logger)
 	b.SetStarboarder(sb)
 
 	return &botFixture{b: b, sess: sess}

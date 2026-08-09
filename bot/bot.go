@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -23,6 +24,7 @@ const EmbedColor = 16744576
 // instance via constructor functions.
 type Bot struct {
 	mu         sync.Mutex
+	ctx        context.Context
 	Session    *discordgo.Session
 	Store      *store.Store
 	Registry   *registry.Registry
@@ -37,8 +39,13 @@ type Config struct {
 	Prefixes []string
 }
 
-// New creates a new Bot with an injected logger.
-func New(st *store.Store, config Config, logger *slog.Logger) *Bot {
+// New creates a new Bot with an injected logger and the app lifecycle
+// context, which is used for all MongoDB calls.
+func New(ctx context.Context, st *store.Store, config Config, logger *slog.Logger) *Bot {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	if config.Prefixes == nil {
 		config.Prefixes = []string{"e!", "e.", "e "}
 	}
@@ -48,6 +55,7 @@ func New(st *store.Store, config Config, logger *slog.Logger) *Bot {
 	}
 
 	b := &Bot{
+		ctx:      ctx,
 		Store:    st,
 		Config:   config,
 		Registry: registry.New(),
@@ -55,6 +63,12 @@ func New(st *store.Store, config Config, logger *slog.Logger) *Bot {
 	}
 
 	return b
+}
+
+// Context returns the app lifecycle context, canceled when a shutdown signal
+// is received. Use it for MongoDB calls that should abort during shutdown.
+func (b *Bot) Context() context.Context {
+	return b.ctx
 }
 
 func (b *Bot) SetStarboarder(sb *starboard.Starboarder) {
@@ -85,7 +99,7 @@ func (b *Bot) Logger() *slog.Logger {
 // It loads all existing guilds into cache, then creates any guilds from
 // the Discord ready event that aren't already in the database.
 func (b *Bot) InitGuilds(eventGuilds []*discordgo.Guild) {
-	ctx := context.Background()
+	ctx := b.Context()
 	guilds, err := b.Store.Guilds.All(ctx)
 	if err != nil {
 		b.log.Warn("loading guilds from db", "err", err)
@@ -198,13 +212,30 @@ func (b *Bot) Close() error {
 	return b.Session.Close()
 }
 
+// Shutdown closes the Discord session and disconnects from MongoDB.
+// The app context is already canceled when shutdown begins,
+// so callers pass a derived context to let the disconnect finish.
+func (b *Bot) Shutdown(ctx context.Context) error {
+	var errs []error
+
+	if err := b.Close(); err != nil {
+		errs = append(errs, err)
+	}
+
+	if err := b.Store.Disconnect(ctx); err != nil {
+		errs = append(errs, err)
+	}
+
+	return errors.Join(errs...)
+}
+
 // CreateIndexes creates database indexes.
-func (b *Bot) CreateIndexes(ctx context.Context) error {
-	if err := b.Store.Guilds.CreateIndex(ctx); err != nil {
+func (b *Bot) CreateIndexes() error {
+	if err := b.Store.Guilds.CreateIndex(b.ctx); err != nil {
 		return fmt.Errorf("bot: creating guilds index: %w", err)
 	}
 
-	if err := b.Store.Messages.CreateIndex(ctx); err != nil {
+	if err := b.Store.Messages.CreateIndex(b.ctx); err != nil {
 		return fmt.Errorf("bot: creating messages index: %w", err)
 	}
 
@@ -213,7 +244,7 @@ func (b *Bot) CreateIndexes(ctx context.Context) error {
 
 // LoadGuildCache seeds the guild cache from the database.
 func (b *Bot) LoadGuildCache() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
 	defer cancel()
 	if n, err := b.Store.Guilds.LoadIntoCache(ctx); err != nil {
 		b.log.Warn("seeding guild cache", "err", err)

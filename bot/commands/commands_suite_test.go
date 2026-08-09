@@ -1,6 +1,7 @@
 package commands_test
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -40,7 +41,7 @@ func newCmdFixture() *cmdFixture {
 	st := mongoContainer.NewTestStore(GinkgoT())
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	b := bot.New(st, bot.Config{Prefixes: []string{"e!"}}, logger)
+	b := bot.New(context.Background(), st, bot.Config{Prefixes: []string{"e!"}}, logger)
 	b.SetMention("<@123456789>")
 	commands.Register(b)
 
