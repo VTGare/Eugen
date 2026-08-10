@@ -77,14 +77,7 @@ func gatedProcess(rec *recorder, started, door chan struct{}) func(starboard.Eve
 
 func passResolve(e *starboard.Event) bool { return true }
 
-func originalDeleteResolve(e *starboard.Event) bool {
-	if e.Type == starboard.EventMessageDelete {
-		e.DeletedOriginal = true
-	}
-	return true
-}
-
-func newQueueStarboarder(workers, maxOutstanding int, ttl time.Duration, process func(starboard.Event) error, resolve func(*starboard.Event) bool) *starboard.Starboarder {
+func newQueueStarboarder(maxActors int, process func(starboard.Event) error, resolve func(*starboard.Event) bool) *starboard.Starboarder {
 	if process == nil {
 		panic("process must be set")
 	}
@@ -96,9 +89,7 @@ func newQueueStarboarder(workers, maxOutstanding int, ttl time.Duration, process
 		context.Background(), nil, nil, log,
 		starboard.WithProcess(process),
 		starboard.WithResolve(resolve),
-		starboard.WithWorkers(workers),
-		starboard.WithMaxOutstanding(maxOutstanding),
-		starboard.WithLaneTTL(ttl),
+		starboard.WithMaxActors(maxActors),
 	)
 }
 
@@ -128,7 +119,7 @@ var _ = Describe("Starboarder queue mechanics", func() {
 		rec := newRecorder()
 		started := make(chan struct{})
 		door := make(chan struct{})
-		sb := newQueueStarboarder(1, 64, time.Minute, gatedProcess(rec, started, door), nil)
+		sb := newQueueStarboarder(1, gatedProcess(rec, started, door), nil)
 
 		sb.Queue(queueAddEvent("msg1", "u1"))
 		<-started
@@ -153,7 +144,7 @@ var _ = Describe("Starboarder queue mechanics", func() {
 
 	It("processes queued events in order, always ending with the newest", func() {
 		rec := newRecorder()
-		sb := newQueueStarboarder(1, 64, time.Minute, gatedProcess(rec, nil, nil), nil)
+		sb := newQueueStarboarder(1, gatedProcess(rec, nil, nil), nil)
 
 		for i := 1; i <= 10; i++ {
 			sb.Queue(queueAddEvent(fmt.Sprintf("msg%d", i), ""))
@@ -170,7 +161,7 @@ var _ = Describe("Starboarder queue mechanics", func() {
 		rec := newRecorder()
 		started := make(chan struct{})
 		door := make(chan struct{})
-		sb := newQueueStarboarder(1, 64, time.Minute, gatedProcess(rec, started, door), nil)
+		sb := newQueueStarboarder(1, gatedProcess(rec, started, door), nil)
 
 		sb.Queue(queueAddEvent("msg1", "u1"))
 		<-started
@@ -187,55 +178,11 @@ var _ = Describe("Starboarder queue mechanics", func() {
 		}))
 	})
 
-	It("tombstones a lane after an original-message delete", func() {
+	It("blocks enqueue beyond the actor cap until an actor goes idle", func() {
 		rec := newRecorder()
 		started := make(chan struct{})
 		door := make(chan struct{})
-		sb := newQueueStarboarder(1, 64, time.Minute, gatedProcess(rec, started, door), originalDeleteResolve)
-
-		sb.Queue(queueAddEvent("msg1", "u1"))
-		<-started
-
-		sb.Queue(queueDeleteEvent("msg1")) // original deleted -> tombstone
-		sb.Queue(queueAddEvent("msg1", "u2"))
-		close(door)
-
-		Eventually(rec.types).Should(Equal([]starboard.EventType{
-			starboard.EventReactionAdd,
-			starboard.EventMessageDelete,
-		}))
-
-		Consistently(rec.types).Should(Equal([]starboard.EventType{
-			starboard.EventReactionAdd,
-			starboard.EventMessageDelete,
-		}), "reaction events after the delete must be dropped")
-
-		// A later event needs a new lane, which is again reactive until the
-		// next terminal event.
-		sb.Queue(queueAddEvent("msg2", "u3"))
-		Eventually(rec.containsType).WithArguments(starboard.EventReactionAdd).Should(BeTrue())
-	})
-
-	It("evicts idle lanes after the TTL", func() {
-		rec := newRecorder()
-		sb := newQueueStarboarder(1, 64, 50*time.Millisecond, gatedProcess(rec, nil, nil), originalDeleteResolve)
-
-		sb.Queue(queueDeleteEvent("msg1"))
-		Eventually(rec.types).Should(ContainElement(starboard.EventMessageDelete))
-
-		// Wait past TTL plus a sweep tick so the tombstoned lane is evicted.
-		time.Sleep(300 * time.Millisecond)
-
-		sb.Queue(queueAddEvent("msg1", "u1"))
-		Eventually(func() bool { return rec.containsType(starboard.EventReactionAdd) }).Should(BeTrue(),
-			"a fresh lane must be created after eviction; the tombstone is gone")
-	})
-
-	It("blocks enqueue beyond the outstanding cap until a worker drains", func() {
-		rec := newRecorder()
-		started := make(chan struct{})
-		door := make(chan struct{})
-		sb := newQueueStarboarder(1, 1, time.Minute, gatedProcess(rec, started, door), nil)
+		sb := newQueueStarboarder(1, gatedProcess(rec, started, door), nil)
 
 		sb.Queue(queueAddEvent("msg1", "u1"))
 		<-started
@@ -247,7 +194,7 @@ var _ = Describe("Starboarder queue mechanics", func() {
 		}()
 
 		Consistently(queued, 50*time.Millisecond).ShouldNot(BeClosed(),
-			"enqueue must block while the outstanding cap is reached")
+			"enqueue must block while the actor cap is reached")
 
 		close(door)
 		Eventually(queued).Should(BeClosed())
@@ -256,7 +203,7 @@ var _ = Describe("Starboarder queue mechanics", func() {
 
 	It("handles concurrent enqueues without deadlock and preserves per-message order", func() {
 		rec := newRecorder()
-		sb := newQueueStarboarder(4, 8192, time.Minute, gatedProcess(rec, nil, nil), nil)
+		sb := newQueueStarboarder(4, gatedProcess(rec, nil, nil), nil)
 
 		const pairs = 8
 		const perPair = 100

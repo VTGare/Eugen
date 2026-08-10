@@ -536,9 +536,19 @@ var _ = Describe("Starboarder processing", func() {
 		Expect(fx.originalGETs.Load()).To(BeZero(), "no original message fetch needed")
 	})
 
-	It("deleting the original message removes the record, deletes the post and freezes the lane", func() {
+	It("deleting the original message removes the record and deletes the post", func() {
 		fx.seedRecord()
-		fx.mockOriginal(fxAuthor, false, star(9)) // must never be fetched
+		// The original is gone, so a stray reaction event after the delete
+		// re-fetches it and gets a 404 rather than reposting. It may instead
+		// be dropped at queue time while the delete is still pending; the
+		// outcome must be the same either way.
+		fx.sess.On("/channels/"+fxChannel+"/messages/"+fxMessage, func(req *http.Request) ([]byte, int) {
+			fx.originalGETs.Add(1)
+			if req.Method != http.MethodGet {
+				return nil, 405
+			}
+			return nil, 404
+		})
 		var deletes atomic.Int32
 		fx.sess.On("/channels/"+fxSBChan+"/messages/"+fxSBMsg, func(req *http.Request) ([]byte, int) {
 			if req.Method == http.MethodDelete {
@@ -546,6 +556,14 @@ var _ = Describe("Starboarder processing", func() {
 				return nil, 204
 			}
 			return nil, 405
+		})
+		var posts atomic.Int32
+		fx.sess.On("/channels/"+fxSBChan+"/messages", func(req *http.Request) ([]byte, int) {
+			if req.Method != http.MethodPost {
+				return nil, 405
+			}
+			posts.Add(1)
+			return testutil.JSON(&discordgo.Message{ID: "repost", ChannelID: fxSBChan}, 200)(req)
 		})
 
 		fx.sb.MessageDeleted(starboard.Event{
@@ -561,9 +579,9 @@ var _ = Describe("Starboarder processing", func() {
 		Eventually(func() int32 { return deletes.Load() }).Should(BeNumerically("==", 1),
 			"the starboard post must be deleted when the original message is deleted")
 		Eventually(fx.record).Should(BeNil(), "the record must be removed")
-		time.Sleep(150 * time.Millisecond)
-		Expect(fx.originalGETs.Load()).To(BeZero(),
-			"reaction events after an original-message delete must be dropped")
+		Consistently(fx.record).Should(BeNil(),
+			"reaction events after the delete must not recreate the starboard")
+		Expect(posts.Load()).To(BeZero(), "a deleted original must never be reposted")
 	})
 
 	It("ignores deletes of messages that are not starboarded", func() {

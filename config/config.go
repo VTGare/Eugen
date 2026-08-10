@@ -10,8 +10,9 @@ import (
 
 // Config is the top-level configuration for Eugen.
 type Config struct {
-	Bot     BotConfig     `json:"bot"`
-	MongoDB MongoDBConfig `json:"mongodb"`
+	Bot      BotConfig     `json:"bot"`
+	MongoDB  MongoDBConfig `json:"mongodb"`
+	LogLevel string        `json:"log_level"`
 }
 
 // BotConfig holds Discord bot settings.
@@ -41,6 +42,7 @@ func defaults() Config {
 			Database:       defaultDatabase,
 			ConnectTimeout: defaultTimeout,
 		},
+		LogLevel: "info",
 	}
 }
 
@@ -78,6 +80,10 @@ func Load() (*Config, error) {
 
 	if v := os.Getenv("EUGEN_PREFIXES"); v != "" {
 		cfg.Bot.Prefixes = strings.Split(v, ",")
+	}
+
+	if v := os.Getenv("EUGEN_LOG_LEVEL"); v != "" {
+		cfg.LogLevel = v
 	}
 
 	// Validate required fields.

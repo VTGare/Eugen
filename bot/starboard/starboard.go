@@ -6,11 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/VTGare/Eugen/bot/starboard/embed"
 	"github.com/VTGare/Eugen/store"
@@ -27,6 +25,21 @@ const (
 	EventReactionsClear
 )
 
+func (t EventType) String() string {
+	switch t {
+	case EventReactionAdd:
+		return "reaction_add"
+	case EventReactionRemove:
+		return "reaction_remove"
+	case EventMessageDelete:
+		return "message_delete"
+	case EventReactionsClear:
+		return "reactions_clear"
+	default:
+		return fmt.Sprintf("unknown(%d)", int(t))
+	}
+}
+
 // Event is a queued operation for a single original message.
 type Event struct {
 	Type      EventType
@@ -36,51 +49,49 @@ type Event struct {
 	UserID    string // user who added/removed the reaction
 
 	// For EventMessageDelete: identifies the message that was deleted.
-	// Queue resolves it against the starboard records and rewrites
-	// ChannelID/MessageID to the original message pair before queueing.
 	DeletedChannel  string
 	DeletedMessage  string
-	DeletedOriginal bool // set by Queue: the deleted message was the original
+	DeletedOriginal bool // the deleted message was the original
 }
 
-// lane is the single-slot mailbox for one original message.
-type lane struct {
-	slot      *Event    // newest pending event; nil when idle
-	owner     bool      // a worker is currently draining this lane
-	tombstone bool      // original message deleted; drop incoming events
-	lastUse   time.Time // last enqueue or processing time
+// actor owns the processing of one original message. It runs as its own
+// goroutine while the message has queued work and returns as soon as it goes
+// idle.
+//
+// A single actor is the serialization point for its message: pending events
+// are coalesced under the Starboarder mutex, so a burst of reactions for the
+// same message collapses into the newest state before the actor sees it.
+type actor struct {
+	sb      *Starboarder
+	key     store.MessagePair
+	pending *Event // newest coalesced event; guarded by sb.mu
 }
 
-// Starboarder processes starboard events from Discord reaction and message
-// delete events. It serializes operations per original-message so that
-// concurrent reaction adds/removes on the same message don't race, while a
-// fixed worker pool bounds the number of concurrent Discord API calls.
+// Starboarder processes starboard events. It guarantees per-message
+// sequential processing while bounding how many messages are handled
+// concurrently:
+//   - One actor goroutine per active original message, holding at most one
+//     pending event. A burst collapses to the newest state because the
+//     reaction count is always re-fetched at processing time.
+//   - A semaphore of maxActors slots bounds the number of live actors, which
+//     also bounds concurrent Discord API calls. Enqueueing work for a new
+//     message beyond the cap blocks the caller until an actor goes idle and
+//     frees a slot.
 type Starboarder struct {
 	session *discordgo.Session
 	store   *store.Store
 	log     *slog.Logger
 	ctx     context.Context
 
-	// process is the injectable event handler. Queue-level semantics
-	// (coalescing, terminal priority) sit in front of it; tests replace it
-	// to exercise the pool without a Discord session or database.
 	process func(Event) error
-
-	// resolve canonicalizes a message-delete event to its original message
-	// pair before queueing. It returns false when the event must be dropped.
 	resolve func(*Event) bool
 
-	workers        int
-	maxOutstanding int
-	ttl            time.Duration
+	maxActors int
 
-	mu      sync.Mutex
-	cond    *sync.Cond
-	lanes   map[store.MessagePair]*lane
-	fifo    []store.MessagePair // lanes with pending work waiting for a worker
-	pending int                 // lanes with work queued or in progress
-	stop    chan struct{}
-	wg      sync.WaitGroup
+	mu     sync.Mutex
+	actors map[store.MessagePair]*actor
+	slots  chan struct{}  // capacity maxActors; one token per live actor
+	wg     sync.WaitGroup // counts in-flight events for WaitForIdle
 }
 
 type Option func(*Starboarder)
@@ -95,21 +106,11 @@ func WithResolve(resolve func(*Event) bool) Option {
 	return func(s *Starboarder) { s.resolve = resolve }
 }
 
-// WithWorkers bounds the size of the worker pool.
-func WithWorkers(n int) Option {
-	return func(s *Starboarder) { s.workers = n }
-}
-
-// WithMaxOutstanding bounds the number of messages with queued or in-flight
-// work. Enqueueing beyond the bound blocks the caller until a worker drains
-// a lane.
-func WithMaxOutstanding(n int) Option {
-	return func(s *Starboarder) { s.maxOutstanding = n }
-}
-
-// WithLaneTTL sets how long an idle lane stays alive before eviction.
-func WithLaneTTL(ttl time.Duration) Option {
-	return func(s *Starboarder) { s.ttl = ttl }
+// WithMaxActors bounds how many messages may be processed concurrently. The
+// same bound caps live actor goroutines and, as a side effect, concurrent
+// Discord API calls.
+func WithMaxActors(n int) Option {
+	return func(s *Starboarder) { s.maxActors = n }
 }
 
 func New(ctx context.Context, session *discordgo.Session, st *store.Store, logger *slog.Logger, opts ...Option) *Starboarder {
@@ -118,18 +119,14 @@ func New(ctx context.Context, session *discordgo.Session, st *store.Store, logge
 	}
 
 	sb := &Starboarder{
-		session:        session,
-		store:          st,
-		log:            logger,
-		ctx:            ctx,
-		workers:        min(80, max(8, runtime.GOMAXPROCS(0)*4)),
-		maxOutstanding: 8192,
-		ttl:            1 * time.Minute,
-		lanes:          make(map[store.MessagePair]*lane),
-		stop:           make(chan struct{}),
+		session:   session,
+		store:     st,
+		log:       logger,
+		ctx:       ctx,
+		maxActors: 512,
+		actors:    make(map[store.MessagePair]*actor),
 	}
 
-	sb.cond = sync.NewCond(&sb.mu)
 	sb.process = sb.handle
 	sb.resolve = sb.resolveDelete
 
@@ -137,189 +134,135 @@ func New(ctx context.Context, session *discordgo.Session, st *store.Store, logge
 		opt(sb)
 	}
 
-	sb.wg.Add(sb.workers)
-	for range sb.workers {
-		go sb.worker()
+	if sb.maxActors < 1 {
+		sb.maxActors = 1
 	}
-
-	go sb.sweeper()
-	go sb.watchContext(ctx)
+	sb.slots = make(chan struct{}, sb.maxActors)
 
 	return sb
 }
 
-// Queue enqueues a starboard event for sequential processing per message.
-// It blocks only when the number of messages with pending work is at the
-// outstanding cap, which requires a sustained fire across many messages.
+// Queue enqueues an event for per-message sequential processing. It blocks
+// only when maxActors messages are already being processed concurrently,
+// which requires sustained pressure across many messages at once.
 func (s *Starboarder) Queue(event Event) {
 	if event.Type == EventMessageDelete && !s.resolve(&event) {
+		return
+	}
+
+	if s.ctx.Err() != nil {
 		return
 	}
 
 	pair := store.NewPair(event.ChannelID, event.MessageID)
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	ln := s.lanes[pair]
-	if ln == nil && s.pending >= s.maxOutstanding {
-		for s.pending >= s.maxOutstanding {
-			s.cond.Wait()
-		}
-		ln = s.lanes[pair]
-	}
-	if ln == nil {
-		ln = &lane{lastUse: time.Now()}
-		s.lanes[pair] = ln
-	}
-
-	if ln.tombstone {
-		// The original message is gone; only the worker may still process
-		// the refills it already owns.
-		return
-	}
-
-	switch {
-	case ln.slot != nil:
-		// A newer reaction event supersedes the pending one; a terminal
-		// event supersedes everything.
-		if isReactionEvent(event.Type) && isReactionEvent(ln.slot.Type) {
-			ln.slot = &event
-		} else if isTerminalEvent(event.Type) {
-			ln.slot = &event
-		} else {
+	a := s.actors[pair]
+	if a == nil {
+		// No actor yet: take a slot, then re-check under the lock in case
+		// another goroutine created the actor while we waited for capacity.
+		s.mu.Unlock()
+		select {
+		case s.slots <- struct{}{}:
+		case <-s.ctx.Done():
 			return
 		}
-	case !ln.owner:
-		ln.slot = &event
-		s.fifo = append(s.fifo, pair)
-		s.pending++
-	default:
-		// The owning worker's drain loop picks the refill up.
-		ln.slot = &event
+		s.mu.Lock()
+		if a = s.actors[pair]; a == nil {
+			a = &actor{sb: s, key: pair}
+			s.actors[pair] = a
+			go a.run()
+		} else {
+			<-s.slots
+		}
 	}
-	ln.lastUse = time.Now()
-	s.cond.Signal()
+
+	if a.pending != nil {
+		switch {
+		case isReactionEvent(event.Type) && isReactionEvent(a.pending.Type):
+			a.pending = &event
+			s.log.Debug(
+				"replaced pending reaction",
+				"type", event.Type.String(),
+				"channel_id", event.ChannelID,
+				"message_id", event.MessageID,
+				"user_id", event.UserID,
+			)
+
+		case isTerminalEvent(event.Type):
+			a.pending = &event
+			s.log.Debug(
+				"superseded pending event with terminal",
+				"type", event.Type.String(),
+				"channel_id", event.ChannelID,
+				"message_id", event.MessageID,
+			)
+
+		default:
+			// A reaction behind a pending terminal event is dropped: the FSM
+			// converges on the newest reaction state at processing time anyway.
+			s.log.Debug(
+				"dropped reaction behind pending terminal",
+				"type", event.Type.String(),
+				"channel_id", event.ChannelID,
+				"message_id", event.MessageID,
+				"user_id", event.UserID,
+			)
+		}
+	} else {
+		a.pending = &event
+		s.wg.Add(1)
+		s.log.Debug(
+			"queued new event",
+			"type", event.Type.String(),
+			"channel_id", event.ChannelID,
+			"message_id", event.MessageID,
+			"user_id", event.UserID,
+		)
+	}
+	s.mu.Unlock()
 }
 
 // WaitForIdle blocks until every queued or in-flight event has finished
 // processing. Useful for graceful shutdown and for tests that must observe
 // the pool quiesce before tearing down their dependencies.
 func (s *Starboarder) WaitForIdle() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for s.pending > 0 {
-		s.cond.Wait()
-	}
-}
-
-func (s *Starboarder) worker() {
-	defer s.wg.Done()
-
-	for {
-		s.mu.Lock()
-		for len(s.fifo) == 0 && !s.stopped() {
-			s.cond.Wait()
-		}
-		if s.stopped() && len(s.fifo) == 0 {
-			s.mu.Unlock()
-			return
-		}
-
-		pair := s.fifo[0]
-		s.fifo = s.fifo[1:]
-		lane := s.lanes[pair]
-		event := *lane.slot
-		lane.slot = nil
-		lane.owner = true
-		s.mu.Unlock()
-
-		s.processEvent(pair, event)
-
-		// Drain refills while they keep arriving, so a burst collapses into
-		// a single worker cycle processing only the newest state.
-		s.mu.Lock()
-		for lane.slot != nil {
-			if lane.tombstone {
-				lane.slot = nil
-				break
-			}
-			next := *lane.slot
-			lane.slot = nil
-			s.mu.Unlock()
-			s.processEvent(pair, next)
-			s.mu.Lock()
-		}
-
-		lane.owner = false
-		lane.lastUse = time.Now()
-		s.pending--
-		s.cond.Broadcast()
-		s.mu.Unlock()
-	}
-}
-
-func (s *Starboarder) processEvent(pair store.MessagePair, e Event) {
-	logger := s.log.With("channel_id", e.ChannelID, "message_id", e.MessageID)
-	if err := s.process(e); err != nil {
-		logger.Warn("starboard event error", "err", err)
-	}
-
-	if e.Type == EventMessageDelete && e.DeletedOriginal {
-		s.mu.Lock()
-		if lane := s.lanes[pair]; lane != nil {
-			lane.tombstone = true
-		}
-		s.mu.Unlock()
-	}
-}
-
-func (s *Starboarder) stopped() bool {
-	select {
-	case <-s.stop:
-		return true
-	default:
-		return false
-	}
-}
-
-// sweeper evicts lanes that have been idle past the TTL so long-lived
-// messages don't accumulate queues forever.
-func (s *Starboarder) sweeper() {
-	ticker := time.NewTicker(max(s.ttl/2, time.Millisecond))
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-s.stop:
-			return
-		case <-ticker.C:
-			s.sweep()
-		}
-	}
-}
-
-func (s *Starboarder) sweep() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	now := time.Now()
-	for pair, lane := range s.lanes {
-		if lane.slot == nil && !lane.owner && now.Sub(lane.lastUse) > s.ttl {
-			delete(s.lanes, pair)
-		}
-	}
-}
-
-// watchContext stops the pool when the app context is canceled. Workers
-// finish whatever work is already queued before exiting.
-func (s *Starboarder) watchContext(ctx context.Context) {
-	<-ctx.Done()
-	s.mu.Lock()
-	close(s.stop)
-	s.cond.Broadcast()
-	s.mu.Unlock()
 	s.wg.Wait()
+}
+
+// run processes the actor's events in order until it goes idle, then frees
+// its slot and removes itself.
+func (a *actor) run() {
+	defer func() {
+		a.sb.mu.Lock()
+		delete(a.sb.actors, a.key)
+		a.sb.mu.Unlock()
+		<-a.sb.slots
+	}()
+
+	for {
+		a.sb.mu.Lock()
+		if a.pending == nil {
+			a.sb.mu.Unlock()
+			return
+		}
+
+		ev := a.pending
+		a.pending = nil
+		a.sb.mu.Unlock()
+
+		a.sb.log.Debug("processing event",
+			"type", ev.Type.String(),
+			"channel_id", ev.ChannelID,
+			"message_id", ev.MessageID,
+			"user_id", ev.UserID)
+
+		if err := a.sb.process(*ev); err != nil {
+			a.sb.log.With("channel_id", ev.ChannelID, "message_id", ev.MessageID).
+				Warn("starboard event error", "err", err)
+		}
+		a.sb.wg.Done()
+	}
 }
 
 // resolveDelete resolves a message-delete event to the original message

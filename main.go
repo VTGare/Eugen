@@ -26,7 +26,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(cfg.LogLevel)); err != nil {
+		slog.Error("parsing EUGEN_LOG_LEVEL", "err", err)
+		os.Exit(1)
+	}
+
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 	slog.SetDefault(log)
 
 	st := setupStore(ctx, cfg, log)
