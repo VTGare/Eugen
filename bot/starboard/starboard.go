@@ -233,17 +233,12 @@ func (s *Starboarder) WaitForIdle() {
 // run processes the actor's events in order until it goes idle, then frees
 // its slot and removes itself.
 func (a *actor) run() {
-	defer func() {
-		a.sb.mu.Lock()
-		delete(a.sb.actors, a.key)
-		a.sb.mu.Unlock()
-		<-a.sb.slots
-	}()
-
 	for {
 		a.sb.mu.Lock()
 		if a.pending == nil {
+			delete(a.sb.actors, a.key)
 			a.sb.mu.Unlock()
+			<-a.sb.slots
 			return
 		}
 
