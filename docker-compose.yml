@@ -1,0 +1,21 @@
+services:
+    mongo:
+        image: mongo:8.0
+        network_mode: host
+        restart: unless-stopped
+        command: ["--bind_ip", "127.0.0.1", "--port", "27017"]
+        volumes:
+            - mongo-data:/data/db
+
+    bot:
+        build: .
+        network_mode: host
+        restart: on-failure
+        depends_on:
+            - mongo
+        environment:
+                EUGEN_MONGODB_URL: ${MONGODB_URL}
+                EUGEN_BOT_TOKEN: ${BOT_TOKEN}
+
+volumes:
+    mongo-data:
